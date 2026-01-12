@@ -3,11 +3,971 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Consensus Gallery | GenLayer DApp</title>
+  <title>Consensus Gallery | GenLayer Game</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { primary: { 300: '#a5b4fc', 400: '#818cf8', 500: '#667eea', 600: '#5a67d8' } } } }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%); min-height: 100vh; font-family: 'Inter', sans-serif; }
+    .gradient-text { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .gradient-text-gold { background: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .glass { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); }
+    .btn-success { background: linear-gradient(135deg, #10B981 0%, #059669 100%); }
+    .btn-warning { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .pulse-dot { animation: pulse 2s ease-in-out infinite; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin 1s linear infinite; }
+    .chat-scroll { max-height: 400px; overflow-y: auto; }
+    .chat-scroll::-webkit-scrollbar { width: 6px; }
+    .chat-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+    .chat-scroll::-webkit-scrollbar-thumb { background: rgba(102,126,234,0.3); border-radius: 3px; }
+  </style>
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="/src/main.jsx"></script>
+  
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+    // ==================== CONFIGURATION ====================
+    // GenLayer Contract (deployed on studionet)
+    const CONTRACT = {
+      ADDRESS: '0x5c2F525BA54839338F9BC9Cd8DF7B656FBc5E7d0',
+      NETWORK: 'studionet',
+      STUDIO_URL: 'https://studio.genlayer.com',
+    };
+
+    // Supabase Configuration - Replace with your credentials
+    const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+    const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+    
+    const supabase = (SUPABASE_URL !== 'YOUR_SUPABASE_URL') 
+      ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+      : null;
+
+    const CONFIG = {
+      MAX_PLAYERS: 5,
+      MIN_PLAYERS: 2,
+      ENTRY_FEE: '0.0001 GEN',
+      MIN_GAME_DURATION: 60,
+      MAX_GAME_DURATION: 10 * 60,
+      VOTE_DURATION: 30,
+      WINNER_EXP: 100,
+      CORRECT_VOTER_EXP: 30,
+      PARTICIPANT_EXP: 10,
+    };
+
+    const STORAGE_KEY = 'consensus_gallery_final_v1';
+
+    // ==================== Art Collection ====================
+    const ART_COLLECTION = [
+      { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
+      { id: 2, name: 'Persistence of Memory', artist: 'Dali', year: 1931, url: 'https://upload.wikimedia.org/wikipedia/en/d/dd/The_Persistence_of_Memory.jpg' },
+      { id: 3, name: 'The Great Wave', artist: 'Hokusai', year: 1831, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Tsunami_by_hokusai_19th_century.jpg/1280px-Tsunami_by_hokusai_19th_century.jpg' },
+      { id: 4, name: 'Girl with Pearl Earring', artist: 'Vermeer', year: 1665, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/1665_Girl_with_a_Pearl_Earring.jpg/800px-1665_Girl_with_a_Pearl_Earring.jpg' },
+      { id: 5, name: 'The Scream', artist: 'Munch', year: 1893, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg/800px-Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg' },
+      { id: 6, name: 'Birth of Venus', artist: 'Botticelli', year: 1485, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg/1280px-Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg' },
+      { id: 7, name: 'American Gothic', artist: 'Wood', year: 1930, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg/800px-Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg' },
+      { id: 8, name: 'The Kiss', artist: 'Klimt', year: 1908, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg/800px-The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg' },
+      { id: 9, name: 'Cafe Terrace', artist: 'Van Gogh', year: 1888, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Van_Gogh_-_Terrasse_des_Caf%C3%A9s_an_der_Place_du_Forum_in_Arles_am_Abend1.jpeg/800px-Van_Gogh_-_Terrasse_des_Caf%C3%A9s_an_der_Place_du_Forum_in_Arles_am_Abend1.jpeg' },
+      { id: 10, name: 'Water Lilies', artist: 'Monet', year: 1906, url: 'https://upload.wikimedia.org/wikipedia/commons/a/aa/Claude_Monet_-_Water_Lilies_-_1906%2C_Ryerson.jpg' },
+      { id: 11, name: 'Whistlers Mother', artist: 'Whistler', year: 1871, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Whistlers_Mother_high_res.jpg/1280px-Whistlers_Mother_high_res.jpg' },
+      { id: 12, name: 'La Grande Jatte', artist: 'Seurat', year: 1886, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/A_Sunday_on_La_Grande_Jatte%2C_Georges_Seurat%2C_1884.jpg/1280px-A_Sunday_on_La_Grande_Jatte%2C_Georges_Seurat%2C_1884.jpg' },
+    ];
+
+    // ==================== Helpers ====================
+    const ADJECTIVES = ['Swift', 'Brave', 'Wise', 'Noble', 'Silent', 'Golden', 'Silver', 'Cosmic', 'Mystic', 'Ancient'];
+    const NOUNS = ['Phoenix', 'Dragon', 'Tiger', 'Eagle', 'Wolf', 'Hawk', 'Lion', 'Bear', 'Serpent', 'Falcon'];
+
+    const generatePlayerId = (address) => {
+      const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+      return `${ADJECTIVES[hash % ADJECTIVES.length]}${NOUNS[(hash * 7) % NOUNS.length]}${(hash % 99) + 1}`;
+    };
+
+    const generateAddress = () => '0x' + Array.from({length: 40}, () => Math.floor(Math.random()*16).toString(16)).join('');
+    const shortenAddress = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '';
+    const formatTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
+    const getArt = (id) => ART_COLLECTION.find(a => a.id === id) || ART_COLLECTION[0];
+    const getRandomArt = () => ART_COLLECTION[Math.floor(Math.random() * ART_COLLECTION.length)];
+
+    const getStorage = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; } catch { return null; } };
+    const setStorage = (data) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {} };
+    const createInitialState = () => ({ rooms: {}, leaderboard: {}, history: [], totalGames: 0, playerIds: {} });
+
+    const phaseLabels = { waiting: 'Waiting', playing: 'Playing', voting: 'Voting', finished: 'Finished' };
+    const phaseColors = { waiting: '#6B7280', playing: '#10B981', voting: '#F59E0B', finished: '#8B5CF6' };
+
+    // ==================== Components ====================
+    const Spinner = () => <div className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>;
+
+    const ArtDisplay = ({ artId, size = 280, showLabel = true }) => {
+      const art = getArt(artId);
+      const [loaded, setLoaded] = useState(false);
+      const isSmall = size <= 80;
+      
+      return (
+        <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
+          {!loaded && <div className="absolute inset-0 flex items-center justify-center bg-white/5 rounded-xl"><Spinner /></div>}
+          <img src={art.url} alt={art.name} onLoad={() => setLoaded(true)}
+            className={`w-full h-full object-cover rounded-xl shadow-xl transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`} />
+          {showLabel && !isSmall && (
+            <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent rounded-b-xl">
+              <div className="text-sm font-medium text-white truncate">{art.name}</div>
+              <div className="text-xs text-gray-300 truncate">{art.artist}, {art.year}</div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ==================== Main App ====================
+    function App() {
+      const [wallet, setWallet] = useState({ connected: false, address: '' });
+      const [globalState, setGlobalState] = useState(() => getStorage() || createInitialState());
+      const [activeTab, setActiveTab] = useState('lobby');
+      const [currentRoomId, setCurrentRoomId] = useState(null);
+      const [message, setMessage] = useState('');
+      const [error, setError] = useState('');
+      const [success, setSuccess] = useState('');
+      const [processing, setProcessing] = useState(false);
+      const [timeLeft, setTimeLeft] = useState(0);
+      const [onlineMode, setOnlineMode] = useState(!!supabase);
+      const [dbConnected, setDbConnected] = useState(false);
+      
+      const globalStateRef = useRef(globalState);
+      globalStateRef.current = globalState;
+      const currentRoomIdRef = useRef(currentRoomId);
+      currentRoomIdRef.current = currentRoomId;
+      const chatEndRef = useRef(null);
+
+      const currentRoom = currentRoomId ? globalState.rooms[currentRoomId] : null;
+
+      const getPlayerId = useCallback((address) => {
+        if (!address) return '';
+        if (globalState.playerIds[address]) return globalState.playerIds[address];
+        const newId = generatePlayerId(address);
+        setGlobalState(prev => ({ ...prev, playerIds: { ...prev.playerIds, [address]: newId } }));
+        return newId;
+      }, [globalState.playerIds]);
+
+      // ==================== Supabase Integration ====================
+      useEffect(() => {
+        if (!supabase) return;
+
+        const testConnection = async () => {
+          try {
+            const { error } = await supabase.from('rooms').select('count').limit(1);
+            if (!error) setDbConnected(true);
+          } catch (err) {
+            console.log('Supabase not connected, using local mode');
+          }
+        };
+        testConnection();
+
+        // Subscribe to room changes
+        const roomsSub = supabase
+          .channel('rooms-realtime')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => {
+            fetchOnlineRooms();
+          })
+          .subscribe();
+
+        fetchOnlineRooms();
+
+        return () => roomsSub.unsubscribe();
+      }, []);
+
+      const fetchOnlineRooms = async () => {
+        if (!supabase || !dbConnected) return;
+        const { data } = await supabase.from('rooms').select('*').neq('phase', 'finished');
+        if (data) {
+          const roomsObj = {};
+          data.forEach(r => {
+            roomsObj[r.id] = {
+              id: r.id,
+              gameNumber: r.game_number,
+              creator: r.creator,
+              phase: r.phase,
+              artId: r.art_id,
+              artName: r.art_name,
+              maxPlayers: r.max_players,
+              players: r.players || [],
+              messages: [],
+              votes: {},
+              endGameVotes: r.end_game_votes || [],
+              winner: r.winner,
+              createdAt: new Date(r.created_at).getTime(),
+              startTime: r.start_time ? new Date(r.start_time).getTime() : null,
+              voteDeadline: r.vote_deadline ? new Date(r.vote_deadline).getTime() : null,
+              locked: r.locked,
+              online: true,
+            };
+          });
+          setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, ...roomsObj } }));
+        }
+      };
+
+      // Storage sync for local mode
+      useEffect(() => { setStorage(globalState); }, [globalState]);
+      
+      useEffect(() => {
+        const handleStorage = (e) => {
+          if (e.key === STORAGE_KEY && e.newValue) {
+            try { setGlobalState(JSON.parse(e.newValue)); } catch {}
+          }
+        };
+        window.addEventListener('storage', handleStorage);
+        const syncInterval = setInterval(() => {
+          const stored = getStorage();
+          if (stored && JSON.stringify(globalStateRef.current) !== JSON.stringify(stored)) {
+            setGlobalState(stored);
+          }
+        }, 500);
+        return () => { window.removeEventListener('storage', handleStorage); clearInterval(syncInterval); };
+      }, []);
+
+      // Game timer
+      useEffect(() => {
+        const timer = setInterval(() => {
+          const state = globalStateRef.current;
+          const now = Date.now();
+
+          const roomId = currentRoomIdRef.current;
+          if (!roomId) return;
+          
+          const room = state.rooms[roomId];
+          if (!room || room.phase === 'finished' || room.phase === 'waiting') {
+            setTimeLeft(0);
+            return;
+          }
+          
+          const elapsed = Math.floor((now - room.startTime) / 1000);
+          const remaining = room.phase === 'voting' 
+            ? Math.max(0, Math.floor((room.voteDeadline - now) / 1000))
+            : CONFIG.MAX_GAME_DURATION - elapsed;
+          
+          setTimeLeft(Math.max(0, remaining));
+
+          if (room.phase === 'playing' && elapsed >= CONFIG.MAX_GAME_DURATION) {
+            handleStartVoting(roomId);
+          } else if (room.phase === 'voting' && remaining <= 0) {
+            handleFinalizeGame(roomId);
+          }
+        }, 1000);
+        
+        return () => clearInterval(timer);
+      }, []);
+
+      useEffect(() => {
+        if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }, [currentRoom?.messages?.length]);
+
+      // Wallet
+      const connectWallet = async () => {
+        setProcessing(true);
+        
+        if (typeof window.ethereum !== 'undefined') {
+          try {
+            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            if (accounts?.length > 0) {
+              setWallet({ connected: true, address: accounts[0], isReal: true });
+              getPlayerId(accounts[0]);
+              setSuccess('Connected with MetaMask!');
+              setProcessing(false);
+              setTimeout(() => setSuccess(''), 3000);
+              return;
+            }
+          } catch (err) {
+            console.log('MetaMask failed');
+          }
+        }
+        
+        const addr = generateAddress();
+        setWallet({ connected: true, address: addr, isReal: false });
+        getPlayerId(addr);
+        setSuccess('Connected in Test Mode');
+        setProcessing(false);
+        setTimeout(() => setSuccess(''), 3000);
+      };
+
+      const switchAccount = () => {
+        const addr = generateAddress();
+        setWallet({ connected: true, address: addr, isReal: false });
+        getPlayerId(addr);
+        setSuccess(`Switched to ${shortenAddress(addr)}`);
+        setTimeout(() => setSuccess(''), 3000);
+      };
+
+      // Room operations
+      const handleCreateRoom = useCallback(async () => {
+        if (!wallet.connected) return;
+        setProcessing(true);
+        
+        const art = getRandomArt();
+        const roomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+        const room = {
+          id: roomId,
+          gameNumber: globalState.totalGames + 1,
+          creator: wallet.address,
+          phase: 'waiting',
+          artId: art.id,
+          artName: art.name,
+          maxPlayers: CONFIG.MAX_PLAYERS,
+          players: [wallet.address],
+          messages: [],
+          votes: {},
+          endGameVotes: [],
+          winner: null,
+          createdAt: Date.now(),
+          startTime: null,
+          voteDeadline: null,
+          locked: false,
+          online: dbConnected,
+        };
+
+        if (dbConnected && supabase) {
+          try {
+            await supabase.from('rooms').insert({
+              id: roomId,
+              game_number: room.gameNumber,
+              creator: wallet.address,
+              art_id: art.id,
+              art_name: art.name,
+              players: [wallet.address],
+            });
+          } catch (err) {
+            console.log('Online insert failed, using local');
+          }
+        }
+
+        setGlobalState(prev => ({
+          ...prev,
+          rooms: { ...prev.rooms, [roomId]: room },
+          totalGames: prev.totalGames + 1,
+        }));
+        setCurrentRoomId(roomId);
+        setActiveTab('game');
+        setSuccess('Room created!');
+        setProcessing(false);
+        setTimeout(() => setSuccess(''), 3000);
+      }, [wallet, globalState.totalGames, dbConnected]);
+
+      const handleJoinRoom = useCallback(async (roomId) => {
+        if (!wallet.connected) return;
+        
+        const room = globalState.rooms[roomId];
+        if (!room || room.phase !== 'waiting' || room.locked) {
+          setError('Room unavailable');
+          return;
+        }
+        if (room.players.length >= room.maxPlayers) {
+          setError('Room is full');
+          return;
+        }
+        if (room.players.includes(wallet.address)) {
+          setCurrentRoomId(roomId);
+          setActiveTab('game');
+          return;
+        }
+
+        if (dbConnected && supabase && room.online) {
+          try {
+            await supabase.from('rooms').update({ 
+              players: [...room.players, wallet.address] 
+            }).eq('id', roomId);
+          } catch (err) {
+            console.log('Online join failed');
+          }
+        }
+
+        setGlobalState(prev => ({
+          ...prev,
+          rooms: {
+            ...prev.rooms,
+            [roomId]: { ...prev.rooms[roomId], players: [...prev.rooms[roomId].players, wallet.address] }
+          }
+        }));
+        setCurrentRoomId(roomId);
+        setActiveTab('game');
+      }, [wallet, globalState.rooms, dbConnected]);
+
+      const handleStartGame = useCallback(async (roomId) => {
+        const room = globalState.rooms[roomId];
+        if (!room || room.phase !== 'waiting' || room.players.length < CONFIG.MIN_PLAYERS) return;
+
+        const startTime = Date.now();
+        
+        if (dbConnected && supabase && room.online) {
+          try {
+            await supabase.from('rooms').update({ 
+              phase: 'playing', 
+              locked: true,
+              start_time: new Date(startTime).toISOString()
+            }).eq('id', roomId);
+          } catch (err) {
+            console.log('Online start failed');
+          }
+        }
+
+        setGlobalState(prev => ({
+          ...prev,
+          rooms: {
+            ...prev.rooms,
+            [roomId]: { ...prev.rooms[roomId], phase: 'playing', locked: true, startTime }
+          }
+        }));
+      }, [globalState.rooms, dbConnected]);
+
+      const handleSendMessage = useCallback(() => {
+        if (!wallet.connected || !currentRoomId || !message.trim()) return;
+        
+        const room = globalState.rooms[currentRoomId];
+        if (!room || room.phase !== 'playing') return;
+
+        const newMessage = { id: Date.now(), author: wallet.address, content: message.trim(), timestamp: Date.now() };
+        const newLeaderboard = { ...globalState.leaderboard };
+        if (!newLeaderboard[wallet.address]) {
+          newLeaderboard[wallet.address] = { experience: 0, wins: 0, participations: 0 };
+        }
+        const hasMessaged = room.messages.some(m => m.author === wallet.address);
+        if (!hasMessaged) newLeaderboard[wallet.address].participations++;
+
+        setGlobalState(prev => ({
+          ...prev,
+          leaderboard: newLeaderboard,
+          rooms: { ...prev.rooms, [currentRoomId]: { ...room, messages: [...room.messages, newMessage] } }
+        }));
+        setMessage('');
+      }, [wallet, currentRoomId, message, globalState]);
+
+      const handleVoteEndGame = useCallback(() => {
+        if (!wallet.connected || !currentRoomId) return;
+        
+        const room = globalState.rooms[currentRoomId];
+        if (!room || room.phase !== 'playing') return;
+        
+        const elapsed = (Date.now() - room.startTime) / 1000;
+        if (elapsed < CONFIG.MIN_GAME_DURATION) return;
+        if (room.endGameVotes.includes(wallet.address)) return;
+        
+        const newEndGameVotes = [...room.endGameVotes, wallet.address];
+        const threshold = Math.ceil(room.players.length / 2);
+        const shouldEnd = newEndGameVotes.length >= threshold;
+        
+        setGlobalState(prev => ({
+          ...prev,
+          rooms: {
+            ...prev.rooms,
+            [currentRoomId]: {
+              ...room,
+              endGameVotes: newEndGameVotes,
+              ...(shouldEnd ? { phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } : {})
+            }
+          }
+        }));
+      }, [wallet, currentRoomId, globalState]);
+
+      const handleStartVoting = useCallback((roomId) => {
+        setGlobalState(prev => {
+          const room = prev.rooms[roomId];
+          if (!room || room.phase !== 'playing') return prev;
+          return {
+            ...prev,
+            rooms: { ...prev.rooms, [roomId]: { ...room, phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } }
+          };
+        });
+      }, []);
+
+      const handleVote = useCallback((targetAddress) => {
+        if (!wallet.connected || !currentRoomId) return;
+        
+        const room = globalState.rooms[currentRoomId];
+        if (!room || room.phase !== 'voting') return;
+        if (room.votes[wallet.address]) {
+          setError('Already voted');
+          return;
+        }
+
+        const newVotes = { ...room.votes, [wallet.address]: targetAddress };
+        const voters = room.messages.map(m => m.author).filter((v, i, a) => a.indexOf(v) === i);
+        const allVoted = voters.every(p => newVotes[p]);
+        
+        if (allVoted) {
+          setGlobalState(prev => finalizeGameState(prev, currentRoomId, newVotes));
+        } else {
+          setGlobalState(prev => ({
+            ...prev,
+            rooms: { ...prev.rooms, [currentRoomId]: { ...room, votes: newVotes } }
+          }));
+        }
+      }, [wallet, currentRoomId, globalState]);
+
+      const handleFinalizeGame = useCallback((roomId) => {
+        setGlobalState(prev => {
+          const room = prev.rooms[roomId];
+          if (!room || room.phase === 'finished') return prev;
+          return finalizeGameState(prev, roomId, room.votes || {});
+        });
+      }, []);
+
+      const finalizeGameState = (prevState, roomId, votes) => {
+        const room = prevState.rooms[roomId];
+        if (!room || room.phase === 'finished') return prevState;
+
+        const authors = room.messages.map(m => m.author).filter((v, i, a) => a.indexOf(v) === i);
+        if (authors.length === 0) {
+          const newRooms = { ...prevState.rooms };
+          delete newRooms[roomId];
+          return { ...prevState, rooms: newRooms };
+        }
+
+        const voteCount = {};
+        authors.forEach(addr => { voteCount[addr] = 0; });
+        Object.values(votes).forEach(target => {
+          if (voteCount[target] !== undefined) voteCount[target]++;
+        });
+
+        const maxVotes = Math.max(...Object.values(voteCount), 0);
+        const winners = authors.filter(addr => voteCount[addr] === maxVotes);
+        const winnerAddress = winners[Math.floor(Math.random() * winners.length)];
+
+        const newLeaderboard = JSON.parse(JSON.stringify(prevState.leaderboard));
+        
+        if (!newLeaderboard[winnerAddress]) {
+          newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0 };
+        }
+        newLeaderboard[winnerAddress].experience += CONFIG.WINNER_EXP;
+        newLeaderboard[winnerAddress].wins += 1;
+
+        Object.entries(votes).forEach(([voter, target]) => {
+          if (!newLeaderboard[voter]) {
+            newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0 };
+          }
+          newLeaderboard[voter].experience += target === winnerAddress ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP;
+        });
+
+        return {
+          ...prevState,
+          leaderboard: newLeaderboard,
+          rooms: { ...prevState.rooms, [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount } }
+        };
+      };
+
+      const handleLeaveRoom = () => {
+        setCurrentRoomId(null);
+        setActiveTab('lobby');
+        setMessage('');
+      };
+
+      // Computed values
+      const availableRooms = useMemo(() => 
+        Object.values(globalState.rooms).filter(r => r.phase === 'waiting' && !r.locked && r.players.length < r.maxPlayers),
+        [globalState.rooms]);
+
+      const myRooms = useMemo(() => 
+        Object.values(globalState.rooms).filter(r => wallet.connected && r.players.includes(wallet.address) && r.phase !== 'finished'),
+        [globalState.rooms, wallet]);
+
+      const sortedLeaderboard = useMemo(() => 
+        Object.entries(globalState.leaderboard)
+          .map(([address, stats]) => ({ address, playerId: globalState.playerIds[address] || generatePlayerId(address), ...stats }))
+          .filter(p => p.participations > 0 || p.experience > 0)
+          .sort((a, b) => b.experience - a.experience),
+        [globalState.leaderboard, globalState.playerIds]);
+
+      const gameElapsed = currentRoom?.startTime ? Math.floor((Date.now() - currentRoom.startTime) / 1000) : 0;
+      const canVoteEnd = currentRoom?.phase === 'playing' && gameElapsed >= CONFIG.MIN_GAME_DURATION;
+      const endVoteProgress = currentRoom ? `${currentRoom.endGameVotes?.length || 0}/${Math.ceil(currentRoom.players.length / 2)}` : '';
+
+      const myPlayerId = wallet.connected ? (globalState.playerIds[wallet.address] || generatePlayerId(wallet.address)) : '';
+      const myXP = wallet.connected ? (globalState.leaderboard[wallet.address]?.experience || 0) : 0;
+
+      // ==================== Render ====================
+      return (
+        <div className="min-h-screen text-gray-200">
+          {/* Header */}
+          <header className="flex justify-between items-center px-4 md:px-6 py-4 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl btn-primary">🎨</div>
+              <div>
+                <h1 className="text-lg md:text-xl font-bold gradient-text">Consensus Gallery</h1>
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${dbConnected ? 'bg-green-500 pulse-dot' : 'bg-yellow-500'}`}></span>
+                  <span className="text-xs text-gray-500">{dbConnected ? 'Online' : 'Local Mode'} • {CONTRACT.NETWORK}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {wallet.connected ? (
+                <>
+                  <div className="flex flex-col items-end gap-1 px-3 py-2 glass rounded-xl">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-xs md:text-sm font-medium">{myPlayerId}</span>
+                      <span className="px-2 py-0.5 bg-primary-500/30 rounded text-xs font-bold text-primary-300">{myXP} XP</span>
+                      {!wallet.isReal && <span className="text-[10px] text-yellow-400">(Test)</span>}
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-mono">{shortenAddress(wallet.address)}</span>
+                  </div>
+                  <button onClick={switchAccount} className="px-2 py-2 text-xs text-gray-400 hover:text-white rounded-lg hover:bg-white/5">👤</button>
+                </>
+              ) : (
+                <button onClick={connectWallet} disabled={processing} className="btn-primary px-4 py-2 rounded-xl text-white text-sm font-semibold flex items-center gap-2">
+                  {processing ? <><Spinner /> Connecting...</> : 'Connect Wallet'}
+                </button>
+              )}
+            </div>
+          </header>
+
+          {/* Notifications */}
+          {error && (
+            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-red-500/90 text-white rounded-lg shadow-lg animate-fade-in flex items-center gap-3">
+              <span>{error}</span>
+              <button onClick={() => setError('')}>✕</button>
+            </div>
+          )}
+          
+          {success && (
+            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-green-500/90 text-white rounded-lg shadow-lg animate-fade-in">
+              ✓ {success}
+            </div>
+          )}
+
+          {/* Navigation */}
+          <nav className="flex gap-1 px-4 md:px-6 py-3 border-b border-white/5 overflow-x-auto">
+            {[
+              { id: 'lobby', icon: '🏠', label: 'Lobby' },
+              { id: 'game', icon: '🎮', label: 'Game', badge: myRooms.length > 0 ? myRooms.length : null },
+              { id: 'leaderboard', icon: '🏆', label: 'Leaderboard' },
+            ].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap ${
+                  activeTab === tab.id ? 'bg-primary-500/20 border border-primary-500/50 text-primary-300' : 'text-gray-400 hover:bg-white/5'
+                }`}>
+                <span>{tab.icon}</span>
+                <span className="hidden sm:inline">{tab.label}</span>
+                {tab.badge && <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full">{tab.badge}</span>}
+              </button>
+            ))}
+          </nav>
+
+          {/* Main Content */}
+          <main className="px-4 md:px-6 py-6 max-w-6xl mx-auto">
+            
+            {/* Lobby */}
+            {activeTab === 'lobby' && (
+              <div className="space-y-6 animate-fade-in">
+                <div className="text-center py-6">
+                  <h2 className="text-2xl md:text-3xl font-bold gradient-text mb-2">Consensus Gallery</h2>
+                  <p className="text-gray-400">Art Description Game on GenLayer</p>
+                </div>
+
+                {!wallet.connected ? (
+                  <div className="glass rounded-2xl p-8 text-center">
+                    <div className="text-5xl mb-4">🔗</div>
+                    <p className="text-gray-400 mb-4">Connect wallet to play</p>
+                    <button onClick={connectWallet} disabled={processing} className="btn-primary px-6 py-3 rounded-xl text-white font-semibold">
+                      {processing ? <><Spinner /> Connecting...</> : 'Connect Wallet'}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="glass rounded-2xl p-6">
+                      <h3 className="text-lg font-semibold mb-4">🎮 Create Game</h3>
+                      <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl text-white font-semibold flex items-center justify-center gap-2">
+                        {processing ? <><Spinner /> Creating...</> : '✨ Create New Room'}
+                      </button>
+                      <p className="text-xs text-gray-500 mt-3 text-center">
+                        {dbConnected ? '🌐 Online multiplayer enabled' : '💾 Local mode (open in multiple tabs)'}
+                      </p>
+                    </div>
+
+                    <div className="glass rounded-2xl p-6">
+                      <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({availableRooms.length})</h3>
+                      {availableRooms.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">No rooms available. Create one!</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {availableRooms.map(room => (
+                            <div key={room.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl hover:bg-white/10 transition">
+                              <div className="flex items-center gap-4">
+                                <ArtDisplay artId={room.artId} size={60} />
+                                <div>
+                                  <div className="font-medium flex items-center gap-2">
+                                    {room.artName}
+                                    {room.online && <span className="w-2 h-2 bg-green-500 rounded-full"></span>}
+                                  </div>
+                                  <div className="text-sm text-gray-400">👥 {room.players?.length || 0}/{room.maxPlayers}</div>
+                                </div>
+                              </div>
+                              <button onClick={() => handleJoinRoom(room.id)} className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">Join</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {myRooms.length > 0 && (
+                      <div className="glass rounded-2xl p-6 border-primary-500/30">
+                        <h3 className="text-lg font-semibold mb-4 text-primary-300">⏳ My Games</h3>
+                        <div className="space-y-3">
+                          {myRooms.map(room => (
+                            <div key={room.id} className="flex items-center justify-between p-4 bg-primary-500/10 rounded-xl">
+                              <div className="flex items-center gap-4">
+                                <ArtDisplay artId={room.artId} size={50} />
+                                <div>
+                                  <div className="font-medium text-sm">{room.artName}</div>
+                                  <div className="text-xs text-gray-400">{phaseLabels[room.phase]} • 👥 {room.players?.length}</div>
+                                </div>
+                              </div>
+                              <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }}
+                                className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">Enter</button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="glass rounded-xl p-4 text-center">
+                    <div className="text-2xl mb-1">🎮</div>
+                    <div className="text-2xl font-bold">{globalState.totalGames}</div>
+                    <div className="text-xs text-gray-500">Games</div>
+                  </div>
+                  <div className="glass rounded-xl p-4 text-center">
+                    <div className="text-2xl mb-1">👥</div>
+                    <div className="text-2xl font-bold">{Object.keys(globalState.leaderboard).length}</div>
+                    <div className="text-xs text-gray-500">Players</div>
+                  </div>
+                  <div className="glass rounded-xl p-4 text-center">
+                    <div className="text-2xl mb-1">⏳</div>
+                    <div className="text-2xl font-bold">{Object.values(globalState.rooms).filter(r => r.phase !== 'finished').length}</div>
+                    <div className="text-xs text-gray-500">Active</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Game Room */}
+            {activeTab === 'game' && (
+              <div className="animate-fade-in">
+                {!currentRoom ? (
+                  <div className="glass rounded-2xl p-8 text-center">
+                    <p className="text-gray-400 mb-4">No active game</p>
+                    <button onClick={() => setActiveTab('lobby')} className="btn-primary px-6 py-3 rounded-xl text-white font-semibold">Go to Lobby</button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left Column */}
+                    <div className="space-y-4">
+                      <div className="glass rounded-xl p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2" 
+                            style={{ background: phaseColors[currentRoom.phase] + '20', color: phaseColors[currentRoom.phase] }}>
+                            <span className="w-2 h-2 rounded-full pulse-dot" style={{ background: phaseColors[currentRoom.phase] }}></span>
+                            {phaseLabels[currentRoom.phase]}
+                          </span>
+                          {(currentRoom.phase === 'playing' || currentRoom.phase === 'voting') && (
+                            <div className={`px-3 py-1.5 rounded-lg ${timeLeft <= 30 ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}>
+                              <span className="text-xl font-bold font-mono">{formatTime(timeLeft)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="glass rounded-xl p-6 text-center">
+                        <ArtDisplay artId={currentRoom.artId} size={300} />
+                        
+                        {currentRoom.phase === 'waiting' && (
+                          <div className="mt-4 p-3 bg-white/5 rounded-lg">
+                            <div className="text-sm text-gray-400 mb-2">Players ({currentRoom.players?.length || 0}/{currentRoom.maxPlayers})</div>
+                            <div className="flex flex-wrap gap-2 justify-center">
+                              {currentRoom.players?.map(addr => (
+                                <span key={addr} className={`px-2 py-1 rounded text-xs ${addr === wallet.address ? 'bg-primary-500/30 text-primary-300' : 'bg-white/10'}`}>
+                                  {globalState.playerIds[addr] || generatePlayerId(addr)}
+                                </span>
+                              ))}
+                            </div>
+                            {currentRoom.creator === wallet.address && currentRoom.players?.length >= CONFIG.MIN_PLAYERS && (
+                              <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">🚀 Start Game</button>
+                            )}
+                            {(currentRoom.players?.length || 0) < CONFIG.MIN_PLAYERS && (
+                              <p className="text-sm text-yellow-500 mt-3">Need {CONFIG.MIN_PLAYERS - (currentRoom.players?.length || 0)} more player(s)</p>
+                            )}
+                          </div>
+                        )}
+
+                        {currentRoom.phase === 'playing' && canVoteEnd && (
+                          <div className="mt-4 p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                            <button onClick={handleVoteEndGame}
+                              disabled={currentRoom.endGameVotes?.includes(wallet.address)}
+                              className={`w-full py-2 rounded-lg font-medium ${currentRoom.endGameVotes?.includes(wallet.address) ? 'bg-white/10 text-gray-500' : 'btn-warning text-white'}`}>
+                              {currentRoom.endGameVotes?.includes(wallet.address) ? `✓ Voted (${endVoteProgress})` : `Vote End (${endVoteProgress})`}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {currentRoom.phase === 'finished' && currentRoom.winner && (
+                        <div className="rounded-xl p-6 text-center" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.2))', border: '1px solid rgba(139,92,246,0.3)' }}>
+                          <div className="text-4xl mb-3">🏆</div>
+                          <h3 className="text-xl font-bold mb-2">Game Over!</h3>
+                          <p className="text-sm text-gray-400">
+                            Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}
+                            {currentRoom.winner === wallet.address && <span className="text-yellow-400 ml-2">🎉 +{CONFIG.WINNER_EXP}XP</span>}
+                          </p>
+                          <button onClick={handleLeaveRoom} className="mt-4 px-4 py-2 bg-white/10 rounded-lg">Back to Lobby</button>
+                        </div>
+                      )}
+
+                      {currentRoom.phase !== 'finished' && (
+                        <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>
+                      )}
+                    </div>
+
+                    {/* Right Column - Chat & Voting */}
+                    <div className="space-y-4">
+                      {currentRoom.phase === 'playing' && (
+                        <div className="glass rounded-xl p-5">
+                          <h3 className="font-semibold mb-3">💬 Describe the Art</h3>
+                          <div className="chat-scroll mb-4 space-y-2 p-2 bg-black/20 rounded-lg min-h-[200px]">
+                            {currentRoom.messages?.length === 0 ? (
+                              <div className="text-center py-8 text-gray-500 text-sm">Start describing!</div>
+                            ) : (
+                              currentRoom.messages?.map(msg => (
+                                <div key={msg.id} className={`p-3 rounded-lg ${msg.author === wallet.address ? 'bg-primary-500/20 ml-8' : 'bg-white/5 mr-8'}`}>
+                                  <div className="flex justify-between items-start mb-1">
+                                    <span className="text-xs font-medium text-gray-400">{globalState.playerIds[msg.author] || generatePlayerId(msg.author)}</span>
+                                    <span className="text-xs text-gray-500">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                                  </div>
+                                  <p className="text-gray-200">{msg.content}</p>
+                                </div>
+                              ))
+                            )}
+                            <div ref={chatEndRef} />
+                          </div>
+                          <div className="flex gap-2">
+                            <input type="text" value={message} onChange={e => setMessage(e.target.value)}
+                              onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
+                              placeholder="Describe the art..."
+                              className="flex-1 px-4 py-2 rounded-lg bg-black/30 border border-white/10 text-gray-200 focus:outline-none focus:border-primary-500/50" />
+                            <button onClick={handleSendMessage} disabled={!message.trim()}
+                              className={`px-4 py-2 rounded-lg font-medium ${message.trim() ? 'btn-success text-white' : 'bg-white/10 text-gray-500'}`}>Send</button>
+                          </div>
+                        </div>
+                      )}
+
+                      {currentRoom.phase === 'voting' && (
+                        <div className="glass rounded-xl p-5">
+                          <h3 className="font-semibold mb-4">🗳️ Vote for Best Description</h3>
+                          <div className="space-y-3">
+                            {[...new Set(currentRoom.messages?.map(m => m.author) || [])].map(addr => {
+                              const authorMsgs = currentRoom.messages?.filter(m => m.author === addr) || [];
+                              const isVoted = currentRoom.votes?.[wallet.address] === addr;
+                              const voteCount = Object.values(currentRoom.votes || {}).filter(v => v === addr).length;
+                              const canVote = !currentRoom.votes?.[wallet.address];
+                              
+                              return (
+                                <div key={addr} onClick={() => canVote && handleVote(addr)}
+                                  className={`p-4 rounded-lg transition ${isVoted ? 'bg-primary-500/20 border border-primary-500/40' : 'bg-white/5 border border-white/5'} ${canVote ? 'cursor-pointer hover:bg-white/10' : ''}`}>
+                                  <div className="flex justify-between items-center mb-2">
+                                    <span className="text-sm font-medium">{globalState.playerIds[addr] || generatePlayerId(addr)}{addr === wallet.address ? ' (You)' : ''}</span>
+                                    <span className="text-yellow-500 text-sm">🗳️ {voteCount}</span>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {authorMsgs.slice(0, 2).map((m, i) => <p key={i} className="text-sm text-gray-300 truncate">"{m.content}"</p>)}
+                                  </div>
+                                  {isVoted && <div className="mt-2 text-sm text-primary-400">✓ Your vote</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {currentRoom.phase === 'finished' && (
+                        <div className="glass rounded-xl p-5">
+                          <h3 className="font-semibold mb-4">📊 Final Results</h3>
+                          <div className="space-y-2">
+                            {[...new Set(currentRoom.messages?.map(m => m.author) || [])]
+                              .sort((a, b) => (currentRoom.voteCount?.[b] || 0) - (currentRoom.voteCount?.[a] || 0))
+                              .map(addr => (
+                                <div key={addr} className={`p-3 rounded-lg ${addr === currentRoom.winner ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
+                                  <div className="flex justify-between">
+                                    <span>{addr === currentRoom.winner && '🏆 '}{globalState.playerIds[addr] || generatePlayerId(addr)}</span>
+                                    <span className="text-yellow-500">{currentRoom.voteCount?.[addr] || 0} votes</span>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Leaderboard */}
+            {activeTab === 'leaderboard' && (
+              <div className="glass rounded-2xl p-6 animate-fade-in">
+                <h2 className="text-2xl font-bold text-center gradient-text-gold mb-6">🏆 Leaderboard</h2>
+                {sortedLeaderboard.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500">No players yet</div>
+                ) : (
+                  <div className="space-y-2">
+                    {sortedLeaderboard.map((p, idx) => (
+                      <div key={p.address} className={`grid grid-cols-[50px_1fr_70px_60px] items-center p-3 rounded-lg ${
+                        idx === 0 ? 'bg-yellow-500/10' : p.address === wallet.address ? 'bg-primary-500/10' : 'bg-white/3'
+                      }`}>
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${
+                          idx < 3 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-white/10'
+                        }`}>{idx < 3 ? ['🥇', '🥈', '🥉'][idx] : idx + 1}</div>
+                        <span className="text-sm font-medium truncate">{p.playerId}{p.address === wallet.address && ' (You)'}</span>
+                        <div className="text-center"><div className="font-bold text-primary-300">{p.experience}</div><div className="text-[10px] text-gray-500">XP</div></div>
+                        <div className="text-center"><div className="font-bold text-green-400">{p.wins}</div><div className="text-[10px] text-gray-500">Wins</div></div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </main>
+
+          {/* Footer */}
+          <footer className="text-center py-6 border-t border-white/5 mt-8">
+            <p className="text-sm text-gray-500 mb-2">
+              Consensus Gallery • <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a>
+            </p>
+            <div className="text-xs text-gray-600">
+              Contract: <a href={CONTRACT.STUDIO_URL} target="_blank" className="font-mono text-primary-400/70 hover:text-primary-400">
+                {shortenAddress(CONTRACT.ADDRESS)}
+              </a>
+              <span className="ml-2">({CONTRACT.NETWORK})</span>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
 </body>
 </html>
