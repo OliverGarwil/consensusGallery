@@ -9,7 +9,6 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -44,25 +43,18 @@
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
     // ==================== CONFIGURATION ====================
-    // GenLayer Contract (deployed on studionet)
     const CONTRACT = {
       ADDRESS: '0x5c2F525BA54839338F9BC9Cd8DF7B656FBc5E7d0',
       NETWORK: 'studionet',
       STUDIO_URL: 'https://studio.genlayer.com',
     };
 
-    // Supabase Configuration - Replace with your credentials
-    const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-    const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
-    
-    const supabase = (SUPABASE_URL !== 'YOUR_SUPABASE_URL') 
-      ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-      : null;
-
     const CONFIG = {
       MAX_PLAYERS: 5,
       MIN_PLAYERS: 2,
-      ENTRY_FEE: '0.0001 GEN',
+      ENTRY_FEE: 0.001,
+      INITIAL_BALANCE: 1.0,
+      WINNER_REWARD_PERCENT: 80,
       MIN_GAME_DURATION: 60,
       MAX_GAME_DURATION: 10 * 60,
       VOTE_DURATION: 30,
@@ -71,7 +63,8 @@
       PARTICIPANT_EXP: 10,
     };
 
-    const STORAGE_KEY = 'consensus_gallery_final_v1';
+    const STORAGE_KEY = 'consensus_gallery_v2';
+    const BALANCE_KEY = 'consensus_gallery_balances';
 
     // ==================== Art Collection ====================
     const ART_COLLECTION = [
@@ -101,11 +94,14 @@
     const generateAddress = () => '0x' + Array.from({length: 40}, () => Math.floor(Math.random()*16).toString(16)).join('');
     const shortenAddress = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '';
     const formatTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
+    const formatGEN = (amount) => amount.toFixed(4);
     const getArt = (id) => ART_COLLECTION.find(a => a.id === id) || ART_COLLECTION[0];
     const getRandomArt = () => ART_COLLECTION[Math.floor(Math.random() * ART_COLLECTION.length)];
 
     const getStorage = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; } catch { return null; } };
     const setStorage = (data) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {} };
+    const getBalances = () => { try { return JSON.parse(localStorage.getItem(BALANCE_KEY)) || {}; } catch { return {}; } };
+    const setBalances = (data) => { try { localStorage.setItem(BALANCE_KEY, JSON.stringify(data)); } catch {} };
     const createInitialState = () => ({ rooms: {}, leaderboard: {}, history: [], totalGames: 0, playerIds: {} });
 
     const phaseLabels = { waiting: 'Waiting', playing: 'Playing', voting: 'Voting', finished: 'Finished' };
@@ -114,17 +110,15 @@
     // ==================== Components ====================
     const Spinner = () => <div className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>;
 
-    const ArtDisplay = ({ artId, size = 280, showLabel = true }) => {
+    const ArtDisplay = ({ artId, size = 280 }) => {
       const art = getArt(artId);
       const [loaded, setLoaded] = useState(false);
-      const isSmall = size <= 80;
-      
       return (
         <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
           {!loaded && <div className="absolute inset-0 flex items-center justify-center bg-white/5 rounded-xl"><Spinner /></div>}
           <img src={art.url} alt={art.name} onLoad={() => setLoaded(true)}
             className={`w-full h-full object-cover rounded-xl shadow-xl transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`} />
-          {showLabel && !isSmall && (
+          {size > 80 && (
             <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent rounded-b-xl">
               <div className="text-sm font-medium text-white truncate">{art.name}</div>
               <div className="text-xs text-gray-300 truncate">{art.artist}, {art.year}</div>
@@ -136,7 +130,8 @@
 
     // ==================== Main App ====================
     function App() {
-      const [wallet, setWallet] = useState({ connected: false, address: '' });
+      const [wallet, setWallet] = useState({ connected: false, address: '', balance: 0 });
+      const [balances, setBalancesState] = useState(() => getBalances());
       const [globalState, setGlobalState] = useState(() => getStorage() || createInitialState());
       const [activeTab, setActiveTab] = useState('lobby');
       const [currentRoomId, setCurrentRoomId] = useState(null);
@@ -145,8 +140,8 @@
       const [success, setSuccess] = useState('');
       const [processing, setProcessing] = useState(false);
       const [timeLeft, setTimeLeft] = useState(0);
-      const [onlineMode, setOnlineMode] = useState(!!supabase);
-      const [dbConnected, setDbConnected] = useState(false);
+      const [showPaymentModal, setShowPaymentModal] = useState(null);
+      const [pendingJoinRoom, setPendingJoinRoom] = useState(null);
       
       const globalStateRef = useRef(globalState);
       globalStateRef.current = globalState;
@@ -156,6 +151,19 @@
 
       const currentRoom = currentRoomId ? globalState.rooms[currentRoomId] : null;
 
+      const getBalance = useCallback((address) => {
+        if (!address) return 0;
+        return balances[address] ?? CONFIG.INITIAL_BALANCE;
+      }, [balances]);
+
+      const updateBalance = useCallback((address, amount) => {
+        setBalancesState(prev => {
+          const newBalances = { ...prev, [address]: (prev[address] ?? CONFIG.INITIAL_BALANCE) + amount };
+          setBalances(newBalances);
+          return newBalances;
+        });
+      }, []);
+
       const getPlayerId = useCallback((address) => {
         if (!address) return '';
         if (globalState.playerIds[address]) return globalState.playerIds[address];
@@ -164,111 +172,37 @@
         return newId;
       }, [globalState.playerIds]);
 
-      // ==================== Supabase Integration ====================
-      useEffect(() => {
-        if (!supabase) return;
-
-        const testConnection = async () => {
-          try {
-            const { error } = await supabase.from('rooms').select('count').limit(1);
-            if (!error) setDbConnected(true);
-          } catch (err) {
-            console.log('Supabase not connected, using local mode');
-          }
-        };
-        testConnection();
-
-        // Subscribe to room changes
-        const roomsSub = supabase
-          .channel('rooms-realtime')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => {
-            fetchOnlineRooms();
-          })
-          .subscribe();
-
-        fetchOnlineRooms();
-
-        return () => roomsSub.unsubscribe();
-      }, []);
-
-      const fetchOnlineRooms = async () => {
-        if (!supabase || !dbConnected) return;
-        const { data } = await supabase.from('rooms').select('*').neq('phase', 'finished');
-        if (data) {
-          const roomsObj = {};
-          data.forEach(r => {
-            roomsObj[r.id] = {
-              id: r.id,
-              gameNumber: r.game_number,
-              creator: r.creator,
-              phase: r.phase,
-              artId: r.art_id,
-              artName: r.art_name,
-              maxPlayers: r.max_players,
-              players: r.players || [],
-              messages: [],
-              votes: {},
-              endGameVotes: r.end_game_votes || [],
-              winner: r.winner,
-              createdAt: new Date(r.created_at).getTime(),
-              startTime: r.start_time ? new Date(r.start_time).getTime() : null,
-              voteDeadline: r.vote_deadline ? new Date(r.vote_deadline).getTime() : null,
-              locked: r.locked,
-              online: true,
-            };
-          });
-          setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, ...roomsObj } }));
-        }
-      };
-
-      // Storage sync for local mode
       useEffect(() => { setStorage(globalState); }, [globalState]);
       
       useEffect(() => {
         const handleStorage = (e) => {
-          if (e.key === STORAGE_KEY && e.newValue) {
-            try { setGlobalState(JSON.parse(e.newValue)); } catch {}
-          }
+          if (e.key === STORAGE_KEY && e.newValue) try { setGlobalState(JSON.parse(e.newValue)); } catch {}
+          if (e.key === BALANCE_KEY && e.newValue) try { setBalancesState(JSON.parse(e.newValue)); } catch {}
         };
         window.addEventListener('storage', handleStorage);
         const syncInterval = setInterval(() => {
           const stored = getStorage();
-          if (stored && JSON.stringify(globalStateRef.current) !== JSON.stringify(stored)) {
-            setGlobalState(stored);
-          }
+          if (stored && JSON.stringify(globalStateRef.current) !== JSON.stringify(stored)) setGlobalState(stored);
+          setBalancesState(getBalances());
         }, 500);
         return () => { window.removeEventListener('storage', handleStorage); clearInterval(syncInterval); };
       }, []);
 
-      // Game timer
       useEffect(() => {
         const timer = setInterval(() => {
-          const state = globalStateRef.current;
-          const now = Date.now();
-
           const roomId = currentRoomIdRef.current;
           if (!roomId) return;
-          
-          const room = state.rooms[roomId];
-          if (!room || room.phase === 'finished' || room.phase === 'waiting') {
-            setTimeLeft(0);
-            return;
-          }
-          
+          const room = globalStateRef.current.rooms[roomId];
+          if (!room || room.phase === 'finished' || room.phase === 'waiting') { setTimeLeft(0); return; }
+          const now = Date.now();
           const elapsed = Math.floor((now - room.startTime) / 1000);
           const remaining = room.phase === 'voting' 
             ? Math.max(0, Math.floor((room.voteDeadline - now) / 1000))
             : CONFIG.MAX_GAME_DURATION - elapsed;
-          
           setTimeLeft(Math.max(0, remaining));
-
-          if (room.phase === 'playing' && elapsed >= CONFIG.MAX_GAME_DURATION) {
-            handleStartVoting(roomId);
-          } else if (room.phase === 'voting' && remaining <= 0) {
-            handleFinalizeGame(roomId);
-          }
+          if (room.phase === 'playing' && elapsed >= CONFIG.MAX_GAME_DURATION) handleStartVoting(roomId);
+          else if (room.phase === 'voting' && remaining <= 0) handleFinalizeGame(roomId);
         }, 1000);
-        
         return () => clearInterval(timer);
       }, []);
 
@@ -276,353 +210,253 @@
         if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }, [currentRoom?.messages?.length]);
 
-      // Wallet
       const connectWallet = async () => {
         setProcessing(true);
-        
         if (typeof window.ethereum !== 'undefined') {
           try {
             const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
             if (accounts?.length > 0) {
-              setWallet({ connected: true, address: accounts[0], isReal: true });
-              getPlayerId(accounts[0]);
+              const addr = accounts[0];
+              setWallet({ connected: true, address: addr, balance: getBalance(addr), isReal: true });
+              getPlayerId(addr);
               setSuccess('Connected with MetaMask!');
               setProcessing(false);
               setTimeout(() => setSuccess(''), 3000);
               return;
             }
-          } catch (err) {
-            console.log('MetaMask failed');
-          }
+          } catch (err) { console.log('MetaMask failed'); }
         }
-        
         const addr = generateAddress();
-        setWallet({ connected: true, address: addr, isReal: false });
+        setWallet({ connected: true, address: addr, balance: getBalance(addr), isReal: false });
         getPlayerId(addr);
-        setSuccess('Connected in Test Mode');
+        setSuccess(`Connected! Balance: ${formatGEN(getBalance(addr))} GEN`);
         setProcessing(false);
         setTimeout(() => setSuccess(''), 3000);
       };
 
       const switchAccount = () => {
         const addr = generateAddress();
-        setWallet({ connected: true, address: addr, isReal: false });
+        setWallet({ connected: true, address: addr, balance: getBalance(addr), isReal: false });
         getPlayerId(addr);
-        setSuccess(`Switched to ${shortenAddress(addr)}`);
+        setSuccess(`Switched! Balance: ${formatGEN(getBalance(addr))} GEN`);
         setTimeout(() => setSuccess(''), 3000);
       };
 
-      // Room operations
-      const handleCreateRoom = useCallback(async () => {
-        if (!wallet.connected) return;
-        setProcessing(true);
-        
+      const PaymentModal = ({ type, onConfirm, onCancel, roomToJoin }) => {
+        const balance = getBalance(wallet.address);
+        const fee = CONFIG.ENTRY_FEE;
+        const hasEnough = balance >= fee;
+        const room = roomToJoin ? globalState.rooms[roomToJoin] : null;
+        const pool = room ? (room.pool || 0) + fee : fee;
+
+        return (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="glass rounded-2xl p-6 max-w-md w-full animate-fade-in">
+              <h3 className="text-xl font-bold mb-4 text-center">
+                {type === 'create' ? '🎮 Create Room' : '🚪 Join Room'}
+              </h3>
+              <div className="space-y-4 mb-6">
+                <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
+                  <span className="text-gray-400">Entry Fee</span>
+                  <span className="font-bold text-yellow-400">{formatGEN(fee)} GEN</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
+                  <span className="text-gray-400">Your Balance</span>
+                  <span className={`font-bold ${hasEnough ? 'text-green-400' : 'text-red-400'}`}>{formatGEN(balance)} GEN</span>
+                </div>
+                {type === 'join' && room && (
+                  <div className="flex justify-between items-center p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                    <span className="text-gray-400">Prize Pool</span>
+                    <span className="font-bold text-yellow-400">{formatGEN(pool)} GEN</span>
+                  </div>
+                )}
+                {!hasEnough && (
+                  <div className="p-3 bg-red-500/10 rounded-lg border border-red-500/30 text-center">
+                    <p className="text-red-400 text-sm">Insufficient balance!</p>
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={onCancel} className="flex-1 py-3 rounded-xl bg-white/10 hover:bg-white/20 transition">Cancel</button>
+                <button onClick={onConfirm} disabled={!hasEnough}
+                  className={`flex-1 py-3 rounded-xl font-semibold transition ${hasEnough ? 'btn-success text-white' : 'bg-gray-500/50 text-gray-400 cursor-not-allowed'}`}>
+                  Pay {formatGEN(fee)} GEN
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const handleCreateRoom = () => { if (wallet.connected) setShowPaymentModal('create'); };
+
+      const confirmCreateRoom = () => {
+        if (getBalance(wallet.address) < CONFIG.ENTRY_FEE) { setError('Insufficient GEN'); setShowPaymentModal(null); return; }
+        updateBalance(wallet.address, -CONFIG.ENTRY_FEE);
         const art = getRandomArt();
         const roomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
         const room = {
-          id: roomId,
-          gameNumber: globalState.totalGames + 1,
-          creator: wallet.address,
-          phase: 'waiting',
-          artId: art.id,
-          artName: art.name,
-          maxPlayers: CONFIG.MAX_PLAYERS,
-          players: [wallet.address],
-          messages: [],
-          votes: {},
-          endGameVotes: [],
-          winner: null,
-          createdAt: Date.now(),
-          startTime: null,
-          voteDeadline: null,
-          locked: false,
-          online: dbConnected,
+          id: roomId, gameNumber: globalState.totalGames + 1, creator: wallet.address, phase: 'waiting',
+          artId: art.id, artName: art.name, maxPlayers: CONFIG.MAX_PLAYERS, players: [wallet.address],
+          pool: CONFIG.ENTRY_FEE, messages: [], votes: {}, endGameVotes: [], winner: null,
+          createdAt: Date.now(), startTime: null, voteDeadline: null, locked: false,
         };
-
-        if (dbConnected && supabase) {
-          try {
-            await supabase.from('rooms').insert({
-              id: roomId,
-              game_number: room.gameNumber,
-              creator: wallet.address,
-              art_id: art.id,
-              art_name: art.name,
-              players: [wallet.address],
-            });
-          } catch (err) {
-            console.log('Online insert failed, using local');
-          }
-        }
-
-        setGlobalState(prev => ({
-          ...prev,
-          rooms: { ...prev.rooms, [roomId]: room },
-          totalGames: prev.totalGames + 1,
-        }));
+        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [roomId]: room }, totalGames: prev.totalGames + 1 }));
         setCurrentRoomId(roomId);
         setActiveTab('game');
-        setSuccess('Room created!');
-        setProcessing(false);
+        setShowPaymentModal(null);
+        setSuccess(`Room created! -${formatGEN(CONFIG.ENTRY_FEE)} GEN`);
         setTimeout(() => setSuccess(''), 3000);
-      }, [wallet, globalState.totalGames, dbConnected]);
+      };
 
-      const handleJoinRoom = useCallback(async (roomId) => {
+      const handleJoinRoom = (roomId) => {
         if (!wallet.connected) return;
-        
         const room = globalState.rooms[roomId];
-        if (!room || room.phase !== 'waiting' || room.locked) {
-          setError('Room unavailable');
-          return;
-        }
-        if (room.players.length >= room.maxPlayers) {
-          setError('Room is full');
-          return;
-        }
-        if (room.players.includes(wallet.address)) {
-          setCurrentRoomId(roomId);
-          setActiveTab('game');
-          return;
-        }
+        if (!room || room.phase !== 'waiting' || room.locked) { setError('Room unavailable'); return; }
+        if (room.players.length >= room.maxPlayers) { setError('Room is full'); return; }
+        if (room.players.includes(wallet.address)) { setCurrentRoomId(roomId); setActiveTab('game'); return; }
+        setPendingJoinRoom(roomId);
+        setShowPaymentModal('join');
+      };
 
-        if (dbConnected && supabase && room.online) {
-          try {
-            await supabase.from('rooms').update({ 
-              players: [...room.players, wallet.address] 
-            }).eq('id', roomId);
-          } catch (err) {
-            console.log('Online join failed');
-          }
-        }
-
-        setGlobalState(prev => ({
-          ...prev,
-          rooms: {
-            ...prev.rooms,
-            [roomId]: { ...prev.rooms[roomId], players: [...prev.rooms[roomId].players, wallet.address] }
-          }
-        }));
+      const confirmJoinRoom = () => {
+        const roomId = pendingJoinRoom;
+        if (!roomId || getBalance(wallet.address) < CONFIG.ENTRY_FEE) { setError('Insufficient GEN'); setShowPaymentModal(null); setPendingJoinRoom(null); return; }
+        updateBalance(wallet.address, -CONFIG.ENTRY_FEE);
+        setGlobalState(prev => {
+          const room = prev.rooms[roomId];
+          if (!room) return prev;
+          return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...room, players: [...room.players, wallet.address], pool: (room.pool || 0) + CONFIG.ENTRY_FEE } } };
+        });
         setCurrentRoomId(roomId);
         setActiveTab('game');
-      }, [wallet, globalState.rooms, dbConnected]);
+        setShowPaymentModal(null);
+        setPendingJoinRoom(null);
+        setSuccess(`Joined! -${formatGEN(CONFIG.ENTRY_FEE)} GEN`);
+        setTimeout(() => setSuccess(''), 3000);
+      };
 
-      const handleStartGame = useCallback(async (roomId) => {
+      const handleStartGame = (roomId) => {
         const room = globalState.rooms[roomId];
         if (!room || room.phase !== 'waiting' || room.players.length < CONFIG.MIN_PLAYERS) return;
+        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [roomId]: { ...prev.rooms[roomId], phase: 'playing', locked: true, startTime: Date.now() } } }));
+      };
 
-        const startTime = Date.now();
-        
-        if (dbConnected && supabase && room.online) {
-          try {
-            await supabase.from('rooms').update({ 
-              phase: 'playing', 
-              locked: true,
-              start_time: new Date(startTime).toISOString()
-            }).eq('id', roomId);
-          } catch (err) {
-            console.log('Online start failed');
-          }
-        }
-
-        setGlobalState(prev => ({
-          ...prev,
-          rooms: {
-            ...prev.rooms,
-            [roomId]: { ...prev.rooms[roomId], phase: 'playing', locked: true, startTime }
-          }
-        }));
-      }, [globalState.rooms, dbConnected]);
-
-      const handleSendMessage = useCallback(() => {
+      const handleSendMessage = () => {
         if (!wallet.connected || !currentRoomId || !message.trim()) return;
-        
         const room = globalState.rooms[currentRoomId];
         if (!room || room.phase !== 'playing') return;
-
         const newMessage = { id: Date.now(), author: wallet.address, content: message.trim(), timestamp: Date.now() };
-        const newLeaderboard = { ...globalState.leaderboard };
-        if (!newLeaderboard[wallet.address]) {
-          newLeaderboard[wallet.address] = { experience: 0, wins: 0, participations: 0 };
-        }
-        const hasMessaged = room.messages.some(m => m.author === wallet.address);
-        if (!hasMessaged) newLeaderboard[wallet.address].participations++;
-
-        setGlobalState(prev => ({
-          ...prev,
-          leaderboard: newLeaderboard,
-          rooms: { ...prev.rooms, [currentRoomId]: { ...room, messages: [...room.messages, newMessage] } }
-        }));
+        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, messages: [...room.messages, newMessage] } } }));
         setMessage('');
-      }, [wallet, currentRoomId, message, globalState]);
+      };
 
-      const handleVoteEndGame = useCallback(() => {
+      const handleVoteEndGame = () => {
         if (!wallet.connected || !currentRoomId) return;
-        
         const room = globalState.rooms[currentRoomId];
         if (!room || room.phase !== 'playing') return;
-        
-        const elapsed = (Date.now() - room.startTime) / 1000;
-        if (elapsed < CONFIG.MIN_GAME_DURATION) return;
+        if ((Date.now() - room.startTime) / 1000 < CONFIG.MIN_GAME_DURATION) return;
         if (room.endGameVotes.includes(wallet.address)) return;
-        
-        const newEndGameVotes = [...room.endGameVotes, wallet.address];
-        const threshold = Math.ceil(room.players.length / 2);
-        const shouldEnd = newEndGameVotes.length >= threshold;
-        
+        const newVotes = [...room.endGameVotes, wallet.address];
+        const shouldEnd = newVotes.length >= Math.ceil(room.players.length / 2);
         setGlobalState(prev => ({
-          ...prev,
-          rooms: {
-            ...prev.rooms,
-            [currentRoomId]: {
-              ...room,
-              endGameVotes: newEndGameVotes,
-              ...(shouldEnd ? { phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } : {})
-            }
-          }
+          ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, endGameVotes: newVotes,
+            ...(shouldEnd ? { phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } : {}) } }
         }));
-      }, [wallet, currentRoomId, globalState]);
+      };
 
-      const handleStartVoting = useCallback((roomId) => {
+      const handleStartVoting = (roomId) => {
         setGlobalState(prev => {
           const room = prev.rooms[roomId];
           if (!room || room.phase !== 'playing') return prev;
-          return {
-            ...prev,
-            rooms: { ...prev.rooms, [roomId]: { ...room, phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } }
-          };
+          return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...room, phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } } };
         });
-      }, []);
+      };
 
-      const handleVote = useCallback((targetAddress) => {
+      const handleVote = (targetAddress) => {
         if (!wallet.connected || !currentRoomId) return;
-        
         const room = globalState.rooms[currentRoomId];
-        if (!room || room.phase !== 'voting') return;
-        if (room.votes[wallet.address]) {
-          setError('Already voted');
-          return;
-        }
-
+        if (!room || room.phase !== 'voting' || room.votes[wallet.address]) { setError('Already voted'); return; }
         const newVotes = { ...room.votes, [wallet.address]: targetAddress };
-        const voters = room.messages.map(m => m.author).filter((v, i, a) => a.indexOf(v) === i);
-        const allVoted = voters.every(p => newVotes[p]);
-        
-        if (allVoted) {
-          setGlobalState(prev => finalizeGameState(prev, currentRoomId, newVotes));
-        } else {
-          setGlobalState(prev => ({
-            ...prev,
-            rooms: { ...prev.rooms, [currentRoomId]: { ...room, votes: newVotes } }
-          }));
-        }
-      }, [wallet, currentRoomId, globalState]);
+        const voters = [...new Set(room.messages.map(m => m.author))];
+        if (voters.every(p => newVotes[p])) setGlobalState(prev => finalizeGameState(prev, currentRoomId, newVotes));
+        else setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, votes: newVotes } } }));
+      };
 
-      const handleFinalizeGame = useCallback((roomId) => {
+      const handleFinalizeGame = (roomId) => {
         setGlobalState(prev => {
           const room = prev.rooms[roomId];
           if (!room || room.phase === 'finished') return prev;
           return finalizeGameState(prev, roomId, room.votes || {});
         });
-      }, []);
+      };
 
       const finalizeGameState = (prevState, roomId, votes) => {
         const room = prevState.rooms[roomId];
         if (!room || room.phase === 'finished') return prevState;
-
-        const authors = room.messages.map(m => m.author).filter((v, i, a) => a.indexOf(v) === i);
+        const authors = [...new Set(room.messages.map(m => m.author))];
         if (authors.length === 0) {
-          const newRooms = { ...prevState.rooms };
-          delete newRooms[roomId];
+          room.players.forEach(addr => updateBalance(addr, CONFIG.ENTRY_FEE));
+          const newRooms = { ...prevState.rooms }; delete newRooms[roomId];
           return { ...prevState, rooms: newRooms };
         }
-
-        const voteCount = {};
-        authors.forEach(addr => { voteCount[addr] = 0; });
-        Object.values(votes).forEach(target => {
-          if (voteCount[target] !== undefined) voteCount[target]++;
-        });
-
+        const voteCount = {}; authors.forEach(addr => { voteCount[addr] = 0; });
+        Object.values(votes).forEach(target => { if (voteCount[target] !== undefined) voteCount[target]++; });
         const maxVotes = Math.max(...Object.values(voteCount), 0);
         const winners = authors.filter(addr => voteCount[addr] === maxVotes);
         const winnerAddress = winners[Math.floor(Math.random() * winners.length)];
-
+        const pool = room.pool || (room.players.length * CONFIG.ENTRY_FEE);
+        const winnerReward = pool * (CONFIG.WINNER_REWARD_PERCENT / 100);
+        const otherShare = (pool - winnerReward) / Math.max(authors.length - 1, 1);
+        authors.forEach(addr => updateBalance(addr, addr === winnerAddress ? winnerReward : otherShare));
         const newLeaderboard = JSON.parse(JSON.stringify(prevState.leaderboard));
-        
-        if (!newLeaderboard[winnerAddress]) {
-          newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0 };
-        }
+        if (!newLeaderboard[winnerAddress]) newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0 };
         newLeaderboard[winnerAddress].experience += CONFIG.WINNER_EXP;
         newLeaderboard[winnerAddress].wins += 1;
-
         Object.entries(votes).forEach(([voter, target]) => {
-          if (!newLeaderboard[voter]) {
-            newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0 };
-          }
+          if (!newLeaderboard[voter]) newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0 };
           newLeaderboard[voter].experience += target === winnerAddress ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP;
         });
-
-        return {
-          ...prevState,
-          leaderboard: newLeaderboard,
-          rooms: { ...prevState.rooms, [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount } }
-        };
+        return { ...prevState, leaderboard: newLeaderboard, rooms: { ...prevState.rooms, [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount, winnerReward } } };
       };
 
-      const handleLeaveRoom = () => {
-        setCurrentRoomId(null);
-        setActiveTab('lobby');
-        setMessage('');
-      };
+      const handleLeaveRoom = () => { setCurrentRoomId(null); setActiveTab('lobby'); setMessage(''); };
 
-      // Computed values
-      const availableRooms = useMemo(() => 
-        Object.values(globalState.rooms).filter(r => r.phase === 'waiting' && !r.locked && r.players.length < r.maxPlayers),
-        [globalState.rooms]);
-
-      const myRooms = useMemo(() => 
-        Object.values(globalState.rooms).filter(r => wallet.connected && r.players.includes(wallet.address) && r.phase !== 'finished'),
-        [globalState.rooms, wallet]);
-
-      const sortedLeaderboard = useMemo(() => 
-        Object.entries(globalState.leaderboard)
-          .map(([address, stats]) => ({ address, playerId: globalState.playerIds[address] || generatePlayerId(address), ...stats }))
-          .filter(p => p.participations > 0 || p.experience > 0)
-          .sort((a, b) => b.experience - a.experience),
-        [globalState.leaderboard, globalState.playerIds]);
+      const availableRooms = useMemo(() => Object.values(globalState.rooms).filter(r => r.phase === 'waiting' && !r.locked && r.players.length < r.maxPlayers), [globalState.rooms]);
+      const myRooms = useMemo(() => Object.values(globalState.rooms).filter(r => wallet.connected && r.players.includes(wallet.address) && r.phase !== 'finished'), [globalState.rooms, wallet]);
+      const sortedLeaderboard = useMemo(() => Object.entries(globalState.leaderboard).map(([address, stats]) => ({ address, playerId: globalState.playerIds[address] || generatePlayerId(address), ...stats })).filter(p => p.participations > 0 || p.experience > 0).sort((a, b) => b.experience - a.experience), [globalState.leaderboard, globalState.playerIds]);
 
       const gameElapsed = currentRoom?.startTime ? Math.floor((Date.now() - currentRoom.startTime) / 1000) : 0;
       const canVoteEnd = currentRoom?.phase === 'playing' && gameElapsed >= CONFIG.MIN_GAME_DURATION;
       const endVoteProgress = currentRoom ? `${currentRoom.endGameVotes?.length || 0}/${Math.ceil(currentRoom.players.length / 2)}` : '';
-
       const myPlayerId = wallet.connected ? (globalState.playerIds[wallet.address] || generatePlayerId(wallet.address)) : '';
       const myXP = wallet.connected ? (globalState.leaderboard[wallet.address]?.experience || 0) : 0;
+      const myBalance = wallet.connected ? getBalance(wallet.address) : 0;
 
-      // ==================== Render ====================
       return (
         <div className="min-h-screen text-gray-200">
-          {/* Header */}
+          {showPaymentModal && <PaymentModal type={showPaymentModal} roomToJoin={pendingJoinRoom} onConfirm={showPaymentModal === 'create' ? confirmCreateRoom : confirmJoinRoom} onCancel={() => { setShowPaymentModal(null); setPendingJoinRoom(null); }} />}
+
           <header className="flex justify-between items-center px-4 md:px-6 py-4 border-b border-white/10">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl btn-primary">🎨</div>
               <div>
                 <h1 className="text-lg md:text-xl font-bold gradient-text">Consensus Gallery</h1>
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${dbConnected ? 'bg-green-500 pulse-dot' : 'bg-yellow-500'}`}></span>
-                  <span className="text-xs text-gray-500">{dbConnected ? 'Online' : 'Local Mode'} • {CONTRACT.NETWORK}</span>
-                </div>
+                <p className="text-xs text-gray-500">{CONTRACT.NETWORK} • Entry: {CONFIG.ENTRY_FEE} GEN</p>
               </div>
             </div>
-            
             <div className="flex items-center gap-2">
               {wallet.connected ? (
                 <>
                   <div className="flex flex-col items-end gap-1 px-3 py-2 glass rounded-xl">
                     <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                       <span className="text-xs md:text-sm font-medium">{myPlayerId}</span>
                       <span className="px-2 py-0.5 bg-primary-500/30 rounded text-xs font-bold text-primary-300">{myXP} XP</span>
-                      {!wallet.isReal && <span className="text-[10px] text-yellow-400">(Test)</span>}
                     </div>
-                    <span className="text-[10px] text-gray-500 font-mono">{shortenAddress(wallet.address)}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-500 font-mono">{shortenAddress(wallet.address)}</span>
+                      <span className="px-2 py-0.5 bg-yellow-500/20 rounded text-xs font-bold text-yellow-400">💰 {formatGEN(myBalance)} GEN</span>
+                    </div>
                   </div>
                   <button onClick={switchAccount} className="px-2 py-2 text-xs text-gray-400 hover:text-white rounded-lg hover:bg-white/5">👤</button>
                 </>
@@ -634,94 +468,65 @@
             </div>
           </header>
 
-          {/* Notifications */}
-          {error && (
-            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-red-500/90 text-white rounded-lg shadow-lg animate-fade-in flex items-center gap-3">
-              <span>{error}</span>
-              <button onClick={() => setError('')}>✕</button>
-            </div>
-          )}
-          
-          {success && (
-            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-green-500/90 text-white rounded-lg shadow-lg animate-fade-in">
-              ✓ {success}
-            </div>
-          )}
+          {error && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-red-500/90 text-white rounded-lg shadow-lg animate-fade-in flex items-center gap-3"><span>{error}</span><button onClick={() => setError('')}>✕</button></div>}
+          {success && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-green-500/90 text-white rounded-lg shadow-lg animate-fade-in">✓ {success}</div>}
 
-          {/* Navigation */}
           <nav className="flex gap-1 px-4 md:px-6 py-3 border-b border-white/5 overflow-x-auto">
-            {[
-              { id: 'lobby', icon: '🏠', label: 'Lobby' },
-              { id: 'game', icon: '🎮', label: 'Game', badge: myRooms.length > 0 ? myRooms.length : null },
-              { id: 'leaderboard', icon: '🏆', label: 'Leaderboard' },
-            ].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap ${
-                  activeTab === tab.id ? 'bg-primary-500/20 border border-primary-500/50 text-primary-300' : 'text-gray-400 hover:bg-white/5'
-                }`}>
-                <span>{tab.icon}</span>
-                <span className="hidden sm:inline">{tab.label}</span>
+            {[{ id: 'lobby', icon: '🏠', label: 'Lobby' }, { id: 'game', icon: '🎮', label: 'Game', badge: myRooms.length > 0 ? myRooms.length : null }, { id: 'leaderboard', icon: '🏆', label: 'Leaderboard' }].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap ${activeTab === tab.id ? 'bg-primary-500/20 border border-primary-500/50 text-primary-300' : 'text-gray-400 hover:bg-white/5'}`}>
+                <span>{tab.icon}</span><span className="hidden sm:inline">{tab.label}</span>
                 {tab.badge && <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full">{tab.badge}</span>}
               </button>
             ))}
           </nav>
 
-          {/* Main Content */}
           <main className="px-4 md:px-6 py-6 max-w-6xl mx-auto">
-            
-            {/* Lobby */}
             {activeTab === 'lobby' && (
               <div className="space-y-6 animate-fade-in">
                 <div className="text-center py-6">
                   <h2 className="text-2xl md:text-3xl font-bold gradient-text mb-2">Consensus Gallery</h2>
-                  <p className="text-gray-400">Art Description Game on GenLayer</p>
+                  <p className="text-gray-400">Art Description Game • Win GEN!</p>
                 </div>
-
                 {!wallet.connected ? (
                   <div className="glass rounded-2xl p-8 text-center">
                     <div className="text-5xl mb-4">🔗</div>
                     <p className="text-gray-400 mb-4">Connect wallet to play</p>
-                    <button onClick={connectWallet} disabled={processing} className="btn-primary px-6 py-3 rounded-xl text-white font-semibold">
-                      {processing ? <><Spinner /> Connecting...</> : 'Connect Wallet'}
-                    </button>
+                    <button onClick={connectWallet} disabled={processing} className="btn-primary px-6 py-3 rounded-xl text-white font-semibold">{processing ? <><Spinner /> Connecting...</> : 'Connect Wallet'}</button>
                   </div>
                 ) : (
                   <>
+                    <div className="glass rounded-2xl p-6 border border-yellow-500/20">
+                      <div className="flex items-center justify-between">
+                        <div><p className="text-sm text-gray-400">Your Balance</p><p className="text-3xl font-bold text-yellow-400">{formatGEN(myBalance)} GEN</p></div>
+                        <div className="text-right"><p className="text-sm text-gray-400">Entry Fee</p><p className="text-xl font-bold text-white">{CONFIG.ENTRY_FEE} GEN</p></div>
+                      </div>
+                    </div>
                     <div className="glass rounded-2xl p-6">
                       <h3 className="text-lg font-semibold mb-4">🎮 Create Game</h3>
-                      <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl text-white font-semibold flex items-center justify-center gap-2">
-                        {processing ? <><Spinner /> Creating...</> : '✨ Create New Room'}
+                      <button onClick={handleCreateRoom} disabled={processing || myBalance < CONFIG.ENTRY_FEE} className={`w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 ${myBalance >= CONFIG.ENTRY_FEE ? 'btn-primary text-white' : 'bg-gray-500/50 text-gray-400 cursor-not-allowed'}`}>
+                        {processing ? <><Spinner /> Creating...</> : `✨ Create Room (${CONFIG.ENTRY_FEE} GEN)`}
                       </button>
-                      <p className="text-xs text-gray-500 mt-3 text-center">
-                        {dbConnected ? '🌐 Online multiplayer enabled' : '💾 Local mode (open in multiple tabs)'}
-                      </p>
+                      {myBalance < CONFIG.ENTRY_FEE && <p className="text-xs text-red-400 mt-2 text-center">Insufficient balance</p>}
                     </div>
-
                     <div className="glass rounded-2xl p-6">
                       <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({availableRooms.length})</h3>
-                      {availableRooms.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500">No rooms available. Create one!</div>
-                      ) : (
+                      {availableRooms.length === 0 ? <div className="text-center py-8 text-gray-500">No rooms available</div> : (
                         <div className="space-y-3">
                           {availableRooms.map(room => (
                             <div key={room.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl hover:bg-white/10 transition">
                               <div className="flex items-center gap-4">
                                 <ArtDisplay artId={room.artId} size={60} />
                                 <div>
-                                  <div className="font-medium flex items-center gap-2">
-                                    {room.artName}
-                                    {room.online && <span className="w-2 h-2 bg-green-500 rounded-full"></span>}
-                                  </div>
-                                  <div className="text-sm text-gray-400">👥 {room.players?.length || 0}/{room.maxPlayers}</div>
+                                  <div className="font-medium">{room.artName}</div>
+                                  <div className="text-sm text-gray-400">👥 {room.players?.length || 0}/{room.maxPlayers} • 💰 {formatGEN(room.pool || CONFIG.ENTRY_FEE)} GEN</div>
                                 </div>
                               </div>
-                              <button onClick={() => handleJoinRoom(room.id)} className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">Join</button>
+                              <button onClick={() => handleJoinRoom(room.id)} disabled={myBalance < CONFIG.ENTRY_FEE} className={`px-4 py-2 rounded-lg text-sm font-medium ${myBalance >= CONFIG.ENTRY_FEE ? 'btn-success text-white' : 'bg-gray-500/50 text-gray-400 cursor-not-allowed'}`}>Join ({CONFIG.ENTRY_FEE} GEN)</button>
                             </div>
                           ))}
                         </div>
                       )}
                     </div>
-
                     {myRooms.length > 0 && (
                       <div className="glass rounded-2xl p-6 border-primary-500/30">
                         <h3 className="text-lg font-semibold mb-4 text-primary-300">⏳ My Games</h3>
@@ -730,13 +535,9 @@
                             <div key={room.id} className="flex items-center justify-between p-4 bg-primary-500/10 rounded-xl">
                               <div className="flex items-center gap-4">
                                 <ArtDisplay artId={room.artId} size={50} />
-                                <div>
-                                  <div className="font-medium text-sm">{room.artName}</div>
-                                  <div className="text-xs text-gray-400">{phaseLabels[room.phase]} • 👥 {room.players?.length}</div>
-                                </div>
+                                <div><div className="font-medium text-sm">{room.artName}</div><div className="text-xs text-gray-400">{phaseLabels[room.phase]} • 💰 {formatGEN(room.pool || 0)} GEN</div></div>
                               </div>
-                              <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }}
-                                className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">Enter</button>
+                              <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }} className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">Enter</button>
                             </div>
                           ))}
                         </div>
@@ -744,136 +545,79 @@
                     )}
                   </>
                 )}
-
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="glass rounded-xl p-4 text-center">
-                    <div className="text-2xl mb-1">🎮</div>
-                    <div className="text-2xl font-bold">{globalState.totalGames}</div>
-                    <div className="text-xs text-gray-500">Games</div>
-                  </div>
-                  <div className="glass rounded-xl p-4 text-center">
-                    <div className="text-2xl mb-1">👥</div>
-                    <div className="text-2xl font-bold">{Object.keys(globalState.leaderboard).length}</div>
-                    <div className="text-xs text-gray-500">Players</div>
-                  </div>
-                  <div className="glass rounded-xl p-4 text-center">
-                    <div className="text-2xl mb-1">⏳</div>
-                    <div className="text-2xl font-bold">{Object.values(globalState.rooms).filter(r => r.phase !== 'finished').length}</div>
-                    <div className="text-xs text-gray-500">Active</div>
-                  </div>
+                  <div className="glass rounded-xl p-4 text-center"><div className="text-2xl mb-1">🎮</div><div className="text-2xl font-bold">{globalState.totalGames}</div><div className="text-xs text-gray-500">Games</div></div>
+                  <div className="glass rounded-xl p-4 text-center"><div className="text-2xl mb-1">👥</div><div className="text-2xl font-bold">{Object.keys(globalState.leaderboard).length}</div><div className="text-xs text-gray-500">Players</div></div>
+                  <div className="glass rounded-xl p-4 text-center"><div className="text-2xl mb-1">💰</div><div className="text-2xl font-bold">{CONFIG.WINNER_REWARD_PERCENT}%</div><div className="text-xs text-gray-500">Winner Share</div></div>
                 </div>
               </div>
             )}
 
-            {/* Game Room */}
             {activeTab === 'game' && (
               <div className="animate-fade-in">
                 {!currentRoom ? (
-                  <div className="glass rounded-2xl p-8 text-center">
-                    <p className="text-gray-400 mb-4">No active game</p>
-                    <button onClick={() => setActiveTab('lobby')} className="btn-primary px-6 py-3 rounded-xl text-white font-semibold">Go to Lobby</button>
-                  </div>
+                  <div className="glass rounded-2xl p-8 text-center"><p className="text-gray-400 mb-4">No active game</p><button onClick={() => setActiveTab('lobby')} className="btn-primary px-6 py-3 rounded-xl text-white font-semibold">Go to Lobby</button></div>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Left Column */}
                     <div className="space-y-4">
                       <div className="glass rounded-xl p-4">
                         <div className="flex items-center justify-between">
-                          <span className="px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2" 
-                            style={{ background: phaseColors[currentRoom.phase] + '20', color: phaseColors[currentRoom.phase] }}>
-                            <span className="w-2 h-2 rounded-full pulse-dot" style={{ background: phaseColors[currentRoom.phase] }}></span>
-                            {phaseLabels[currentRoom.phase]}
+                          <span className="px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2" style={{ background: phaseColors[currentRoom.phase] + '20', color: phaseColors[currentRoom.phase] }}>
+                            <span className="w-2 h-2 rounded-full pulse-dot" style={{ background: phaseColors[currentRoom.phase] }}></span>{phaseLabels[currentRoom.phase]}
                           </span>
-                          {(currentRoom.phase === 'playing' || currentRoom.phase === 'voting') && (
-                            <div className={`px-3 py-1.5 rounded-lg ${timeLeft <= 30 ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}>
-                              <span className="text-xl font-bold font-mono">{formatTime(timeLeft)}</span>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm text-yellow-400 font-bold">💰 {formatGEN(currentRoom.pool || 0)} GEN</span>
+                            {(currentRoom.phase === 'playing' || currentRoom.phase === 'voting') && <div className={`px-3 py-1.5 rounded-lg ${timeLeft <= 30 ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}><span className="text-xl font-bold font-mono">{formatTime(timeLeft)}</span></div>}
+                          </div>
                         </div>
                       </div>
-
                       <div className="glass rounded-xl p-6 text-center">
                         <ArtDisplay artId={currentRoom.artId} size={300} />
-                        
                         {currentRoom.phase === 'waiting' && (
                           <div className="mt-4 p-3 bg-white/5 rounded-lg">
                             <div className="text-sm text-gray-400 mb-2">Players ({currentRoom.players?.length || 0}/{currentRoom.maxPlayers})</div>
-                            <div className="flex flex-wrap gap-2 justify-center">
-                              {currentRoom.players?.map(addr => (
-                                <span key={addr} className={`px-2 py-1 rounded text-xs ${addr === wallet.address ? 'bg-primary-500/30 text-primary-300' : 'bg-white/10'}`}>
-                                  {globalState.playerIds[addr] || generatePlayerId(addr)}
-                                </span>
-                              ))}
-                            </div>
-                            {currentRoom.creator === wallet.address && currentRoom.players?.length >= CONFIG.MIN_PLAYERS && (
-                              <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">🚀 Start Game</button>
-                            )}
-                            {(currentRoom.players?.length || 0) < CONFIG.MIN_PLAYERS && (
-                              <p className="text-sm text-yellow-500 mt-3">Need {CONFIG.MIN_PLAYERS - (currentRoom.players?.length || 0)} more player(s)</p>
-                            )}
+                            <div className="flex flex-wrap gap-2 justify-center">{currentRoom.players?.map(addr => <span key={addr} className={`px-2 py-1 rounded text-xs ${addr === wallet.address ? 'bg-primary-500/30 text-primary-300' : 'bg-white/10'}`}>{globalState.playerIds[addr] || generatePlayerId(addr)}</span>)}</div>
+                            {currentRoom.creator === wallet.address && currentRoom.players?.length >= CONFIG.MIN_PLAYERS && <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">🚀 Start Game</button>}
+                            {(currentRoom.players?.length || 0) < CONFIG.MIN_PLAYERS && <p className="text-sm text-yellow-500 mt-3">Need {CONFIG.MIN_PLAYERS - (currentRoom.players?.length || 0)} more player(s)</p>}
                           </div>
                         )}
-
                         {currentRoom.phase === 'playing' && canVoteEnd && (
                           <div className="mt-4 p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
-                            <button onClick={handleVoteEndGame}
-                              disabled={currentRoom.endGameVotes?.includes(wallet.address)}
-                              className={`w-full py-2 rounded-lg font-medium ${currentRoom.endGameVotes?.includes(wallet.address) ? 'bg-white/10 text-gray-500' : 'btn-warning text-white'}`}>
-                              {currentRoom.endGameVotes?.includes(wallet.address) ? `✓ Voted (${endVoteProgress})` : `Vote End (${endVoteProgress})`}
-                            </button>
+                            <button onClick={handleVoteEndGame} disabled={currentRoom.endGameVotes?.includes(wallet.address)} className={`w-full py-2 rounded-lg font-medium ${currentRoom.endGameVotes?.includes(wallet.address) ? 'bg-white/10 text-gray-500' : 'btn-warning text-white'}`}>{currentRoom.endGameVotes?.includes(wallet.address) ? `✓ Voted (${endVoteProgress})` : `Vote End (${endVoteProgress})`}</button>
                           </div>
                         )}
                       </div>
-
                       {currentRoom.phase === 'finished' && currentRoom.winner && (
                         <div className="rounded-xl p-6 text-center" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.2))', border: '1px solid rgba(139,92,246,0.3)' }}>
                           <div className="text-4xl mb-3">🏆</div>
                           <h3 className="text-xl font-bold mb-2">Game Over!</h3>
-                          <p className="text-sm text-gray-400">
-                            Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}
-                            {currentRoom.winner === wallet.address && <span className="text-yellow-400 ml-2">🎉 +{CONFIG.WINNER_EXP}XP</span>}
-                          </p>
+                          <p className="text-sm text-gray-400 mb-2">Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}</p>
+                          <p className="text-lg font-bold text-yellow-400">💰 Won: {formatGEN(currentRoom.winnerReward || 0)} GEN</p>
+                          {currentRoom.winner === wallet.address && <p className="text-green-400 mt-2">🎉 You won!</p>}
                           <button onClick={handleLeaveRoom} className="mt-4 px-4 py-2 bg-white/10 rounded-lg">Back to Lobby</button>
                         </div>
                       )}
-
-                      {currentRoom.phase !== 'finished' && (
-                        <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>
-                      )}
+                      {currentRoom.phase !== 'finished' && <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>}
                     </div>
-
-                    {/* Right Column - Chat & Voting */}
                     <div className="space-y-4">
                       {currentRoom.phase === 'playing' && (
                         <div className="glass rounded-xl p-5">
                           <h3 className="font-semibold mb-3">💬 Describe the Art</h3>
                           <div className="chat-scroll mb-4 space-y-2 p-2 bg-black/20 rounded-lg min-h-[200px]">
-                            {currentRoom.messages?.length === 0 ? (
-                              <div className="text-center py-8 text-gray-500 text-sm">Start describing!</div>
-                            ) : (
-                              currentRoom.messages?.map(msg => (
-                                <div key={msg.id} className={`p-3 rounded-lg ${msg.author === wallet.address ? 'bg-primary-500/20 ml-8' : 'bg-white/5 mr-8'}`}>
-                                  <div className="flex justify-between items-start mb-1">
-                                    <span className="text-xs font-medium text-gray-400">{globalState.playerIds[msg.author] || generatePlayerId(msg.author)}</span>
-                                    <span className="text-xs text-gray-500">{new Date(msg.timestamp).toLocaleTimeString()}</span>
-                                  </div>
-                                  <p className="text-gray-200">{msg.content}</p>
-                                </div>
-                              ))
-                            )}
+                            {currentRoom.messages?.length === 0 ? <div className="text-center py-8 text-gray-500 text-sm">Start describing!</div> : currentRoom.messages?.map(msg => (
+                              <div key={msg.id} className={`p-3 rounded-lg ${msg.author === wallet.address ? 'bg-primary-500/20 ml-8' : 'bg-white/5 mr-8'}`}>
+                                <div className="flex justify-between items-start mb-1"><span className="text-xs font-medium text-gray-400">{globalState.playerIds[msg.author] || generatePlayerId(msg.author)}</span><span className="text-xs text-gray-500">{new Date(msg.timestamp).toLocaleTimeString()}</span></div>
+                                <p className="text-gray-200">{msg.content}</p>
+                              </div>
+                            ))}
                             <div ref={chatEndRef} />
                           </div>
                           <div className="flex gap-2">
-                            <input type="text" value={message} onChange={e => setMessage(e.target.value)}
-                              onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
-                              placeholder="Describe the art..."
-                              className="flex-1 px-4 py-2 rounded-lg bg-black/30 border border-white/10 text-gray-200 focus:outline-none focus:border-primary-500/50" />
-                            <button onClick={handleSendMessage} disabled={!message.trim()}
-                              className={`px-4 py-2 rounded-lg font-medium ${message.trim() ? 'btn-success text-white' : 'bg-white/10 text-gray-500'}`}>Send</button>
+                            <input type="text" value={message} onChange={e => setMessage(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleSendMessage()} placeholder="Describe the art..." className="flex-1 px-4 py-2 rounded-lg bg-black/30 border border-white/10 text-gray-200 focus:outline-none focus:border-primary-500/50" />
+                            <button onClick={handleSendMessage} disabled={!message.trim()} className={`px-4 py-2 rounded-lg font-medium ${message.trim() ? 'btn-success text-white' : 'bg-white/10 text-gray-500'}`}>Send</button>
                           </div>
                         </div>
                       )}
-
                       {currentRoom.phase === 'voting' && (
                         <div className="glass rounded-xl p-5">
                           <h3 className="font-semibold mb-4">🗳️ Vote for Best Description</h3>
@@ -882,18 +626,10 @@
                               const authorMsgs = currentRoom.messages?.filter(m => m.author === addr) || [];
                               const isVoted = currentRoom.votes?.[wallet.address] === addr;
                               const voteCount = Object.values(currentRoom.votes || {}).filter(v => v === addr).length;
-                              const canVote = !currentRoom.votes?.[wallet.address];
-                              
                               return (
-                                <div key={addr} onClick={() => canVote && handleVote(addr)}
-                                  className={`p-4 rounded-lg transition ${isVoted ? 'bg-primary-500/20 border border-primary-500/40' : 'bg-white/5 border border-white/5'} ${canVote ? 'cursor-pointer hover:bg-white/10' : ''}`}>
-                                  <div className="flex justify-between items-center mb-2">
-                                    <span className="text-sm font-medium">{globalState.playerIds[addr] || generatePlayerId(addr)}{addr === wallet.address ? ' (You)' : ''}</span>
-                                    <span className="text-yellow-500 text-sm">🗳️ {voteCount}</span>
-                                  </div>
-                                  <div className="space-y-1">
-                                    {authorMsgs.slice(0, 2).map((m, i) => <p key={i} className="text-sm text-gray-300 truncate">"{m.content}"</p>)}
-                                  </div>
+                                <div key={addr} onClick={() => !currentRoom.votes?.[wallet.address] && handleVote(addr)} className={`p-4 rounded-lg transition ${isVoted ? 'bg-primary-500/20 border border-primary-500/40' : 'bg-white/5 border border-white/5'} ${!currentRoom.votes?.[wallet.address] ? 'cursor-pointer hover:bg-white/10' : ''}`}>
+                                  <div className="flex justify-between items-center mb-2"><span className="text-sm font-medium">{globalState.playerIds[addr] || generatePlayerId(addr)}{addr === wallet.address ? ' (You)' : ''}</span><span className="text-yellow-500 text-sm">🗳️ {voteCount}</span></div>
+                                  <div className="space-y-1">{authorMsgs.slice(0, 2).map((m, i) => <p key={i} className="text-sm text-gray-300 truncate">"{m.content}"</p>)}</div>
                                   {isVoted && <div className="mt-2 text-sm text-primary-400">✓ Your vote</div>}
                                 </div>
                               );
@@ -901,21 +637,15 @@
                           </div>
                         </div>
                       )}
-
                       {currentRoom.phase === 'finished' && (
                         <div className="glass rounded-xl p-5">
                           <h3 className="font-semibold mb-4">📊 Final Results</h3>
                           <div className="space-y-2">
-                            {[...new Set(currentRoom.messages?.map(m => m.author) || [])]
-                              .sort((a, b) => (currentRoom.voteCount?.[b] || 0) - (currentRoom.voteCount?.[a] || 0))
-                              .map(addr => (
-                                <div key={addr} className={`p-3 rounded-lg ${addr === currentRoom.winner ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
-                                  <div className="flex justify-between">
-                                    <span>{addr === currentRoom.winner && '🏆 '}{globalState.playerIds[addr] || generatePlayerId(addr)}</span>
-                                    <span className="text-yellow-500">{currentRoom.voteCount?.[addr] || 0} votes</span>
-                                  </div>
-                                </div>
-                              ))}
+                            {[...new Set(currentRoom.messages?.map(m => m.author) || [])].sort((a, b) => (currentRoom.voteCount?.[b] || 0) - (currentRoom.voteCount?.[a] || 0)).map(addr => (
+                              <div key={addr} className={`p-3 rounded-lg ${addr === currentRoom.winner ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
+                                <div className="flex justify-between"><span>{addr === currentRoom.winner && '🏆 '}{globalState.playerIds[addr] || generatePlayerId(addr)}</span><span className="text-yellow-500">{currentRoom.voteCount?.[addr] || 0} votes</span></div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       )}
@@ -925,24 +655,18 @@
               </div>
             )}
 
-            {/* Leaderboard */}
             {activeTab === 'leaderboard' && (
               <div className="glass rounded-2xl p-6 animate-fade-in">
                 <h2 className="text-2xl font-bold text-center gradient-text-gold mb-6">🏆 Leaderboard</h2>
-                {sortedLeaderboard.length === 0 ? (
-                  <div className="text-center py-10 text-gray-500">No players yet</div>
-                ) : (
+                {sortedLeaderboard.length === 0 ? <div className="text-center py-10 text-gray-500">No players yet</div> : (
                   <div className="space-y-2">
                     {sortedLeaderboard.map((p, idx) => (
-                      <div key={p.address} className={`grid grid-cols-[50px_1fr_70px_60px] items-center p-3 rounded-lg ${
-                        idx === 0 ? 'bg-yellow-500/10' : p.address === wallet.address ? 'bg-primary-500/10' : 'bg-white/3'
-                      }`}>
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${
-                          idx < 3 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-white/10'
-                        }`}>{idx < 3 ? ['🥇', '🥈', '🥉'][idx] : idx + 1}</div>
+                      <div key={p.address} className={`grid grid-cols-[50px_1fr_70px_60px_80px] items-center p-3 rounded-lg ${idx === 0 ? 'bg-yellow-500/10' : p.address === wallet.address ? 'bg-primary-500/10' : 'bg-white/3'}`}>
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${idx < 3 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-white/10'}`}>{idx < 3 ? ['🥇', '🥈', '🥉'][idx] : idx + 1}</div>
                         <span className="text-sm font-medium truncate">{p.playerId}{p.address === wallet.address && ' (You)'}</span>
                         <div className="text-center"><div className="font-bold text-primary-300">{p.experience}</div><div className="text-[10px] text-gray-500">XP</div></div>
                         <div className="text-center"><div className="font-bold text-green-400">{p.wins}</div><div className="text-[10px] text-gray-500">Wins</div></div>
+                        <div className="text-center"><div className="font-bold text-yellow-400">{formatGEN(getBalance(p.address))}</div><div className="text-[10px] text-gray-500">GEN</div></div>
                       </div>
                     ))}
                   </div>
@@ -951,17 +675,9 @@
             )}
           </main>
 
-          {/* Footer */}
           <footer className="text-center py-6 border-t border-white/5 mt-8">
-            <p className="text-sm text-gray-500 mb-2">
-              Consensus Gallery • <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a>
-            </p>
-            <div className="text-xs text-gray-600">
-              Contract: <a href={CONTRACT.STUDIO_URL} target="_blank" className="font-mono text-primary-400/70 hover:text-primary-400">
-                {shortenAddress(CONTRACT.ADDRESS)}
-              </a>
-              <span className="ml-2">({CONTRACT.NETWORK})</span>
-            </div>
+            <p className="text-sm text-gray-500 mb-2">Consensus Gallery • <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a></p>
+            <div className="text-xs text-gray-600">Contract: <a href={CONTRACT.STUDIO_URL} target="_blank" className="font-mono text-primary-400/70 hover:text-primary-400">{shortenAddress(CONTRACT.ADDRESS)}</a></div>
           </footer>
         </div>
       );
