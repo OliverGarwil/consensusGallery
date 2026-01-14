@@ -62,10 +62,22 @@
       CORRECT_VOTER_EXP: 30,
       PARTICIPANT_EXP: 10,
       ROOM_EXPIRE_HOURS: 2, // 房间过期时间（小时）
+      AI_FILL_DELAY: 10, // 10秒后自动填充AI玩家
     };
 
+    // AI玩家配置
+    const AI_PLAYERS = [
+      { address: '0xAI00000000000000000000000000000000000001', name: 'ArtBot_Alpha' },
+      { address: '0xAI00000000000000000000000000000000000002', name: 'ArtBot_Beta' },
+      { address: '0xAI00000000000000000000000000000000000003', name: 'ArtBot_Gamma' },
+      { address: '0xAI00000000000000000000000000000000000004', name: 'ArtBot_Delta' },
+    ];
+
+    // 检查是否是AI玩家
+    const isAIPlayer = (address) => address && address.startsWith('0xAI');
+
     // 更新版本号，清除旧数据
-    const STORAGE_KEY = 'consensus_gallery_v8';
+    const STORAGE_KEY = 'consensus_gallery_v9';
 
     const ART_COLLECTION = [
       { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
@@ -86,6 +98,10 @@
     const NOUNS = ['Phoenix', 'Dragon', 'Tiger', 'Eagle', 'Wolf', 'Hawk', 'Lion', 'Bear', 'Serpent', 'Falcon'];
 
     const generatePlayerId = (address) => {
+      // 检查是否是AI玩家
+      const aiPlayer = AI_PLAYERS.find(ai => ai.address === address);
+      if (aiPlayer) return aiPlayer.name;
+      
       const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
       return `${ADJECTIVES[hash % ADJECTIVES.length]}${NOUNS[(hash * 7) % NOUNS.length]}${(hash % 99) + 1}`;
     };
@@ -348,6 +364,7 @@
             startTime: null,
             voteDeadline: null, 
             locked: false,
+            aiFillScheduled: Date.now() + CONFIG.AI_FILL_DELAY * 1000, // 记录AI填充时间
           };
           
           setGlobalState(prev => ({ 
@@ -360,6 +377,30 @@
           setActiveTab('game');
           setSuccess('Room Created!');
           setTimeout(() => setSuccess(''), 3000);
+          
+          // 10秒后检查并自动填充AI玩家
+          setTimeout(() => {
+            setGlobalState(prev => {
+              const currentRoom = prev.rooms[roomId];
+              // 检查房间是否存在、是否还在等待状态、是否只有创建者一人
+              if (!currentRoom || currentRoom.phase !== 'waiting' || currentRoom.players.length > 1) {
+                return prev;
+              }
+              // 添加4个AI玩家
+              const aiAddresses = AI_PLAYERS.map(ai => ai.address);
+              return {
+                ...prev,
+                rooms: {
+                  ...prev.rooms,
+                  [roomId]: {
+                    ...currentRoom,
+                    players: [...currentRoom.players, ...aiAddresses],
+                  }
+                }
+              };
+            });
+          }, CONFIG.AI_FILL_DELAY * 1000);
+          
         } catch (err) {
           console.error('Create room error:', err);
           if (err.code === 4001) {
@@ -814,7 +855,8 @@
                             <div className="text-sm text-gray-400 mb-2">Players ({currentRoom.players?.length || 0}/{currentRoom.maxPlayers})</div>
                             <div className="flex flex-wrap gap-2 justify-center">
                               {currentRoom.players?.map(addr => (
-                                <span key={addr} className={`px-2 py-1 rounded text-xs ${addr === wallet.address ? 'bg-primary-500/30 text-primary-300' : 'bg-white/10'}`}>
+                                <span key={addr} className={`px-2 py-1 rounded text-xs ${addr === wallet.address ? 'bg-primary-500/30 text-primary-300' : isAIPlayer(addr) ? 'bg-yellow-500/20 text-yellow-300' : 'bg-white/10'}`}>
+                                  {isAIPlayer(addr) && '🤖 '}
                                   {globalState.playerIds[addr] || generatePlayerId(addr)}
                                   {addr === currentRoom.creator && ' 👑'}
                                 </span>
@@ -825,12 +867,17 @@
                                 🚀 Start Game
                               </button>
                             )}
-                            {(currentRoom.players?.length || 0) < CONFIG.MIN_PLAYERS && (
+                            {(currentRoom.players?.length || 0) < CONFIG.MIN_PLAYERS && currentRoom.players?.length === 1 && (
+                              <p className="text-sm text-yellow-500 mt-3">
+                                Waiting for players... (AI will join in {CONFIG.AI_FILL_DELAY}s if no one joins)
+                              </p>
+                            )}
+                            {(currentRoom.players?.length || 0) < CONFIG.MIN_PLAYERS && currentRoom.players?.length > 1 && (
                               <p className="text-sm text-yellow-500 mt-3">
                                 Waiting for {CONFIG.MIN_PLAYERS - (currentRoom.players?.length || 0)} more player(s)...
                               </p>
                             )}
-                            {currentRoom.creator !== wallet.address && (
+                            {currentRoom.creator !== wallet.address && currentRoom.players?.length >= CONFIG.MIN_PLAYERS && (
                               <p className="text-sm text-gray-400 mt-3">Waiting for host to start...</p>
                             )}
                           </div>
