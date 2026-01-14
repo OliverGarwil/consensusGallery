@@ -42,11 +42,10 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-   
     const CONTRACT = {
       ADDRESS: '0x5c2F525BA54839338F9BC9Cd8DF7B656FBc5E7d0',
       NETWORK: 'GenLayer Studio',
-      CHAIN_ID: '0x' + (10242).toString(16), // Asimov Testnet Chain ID
+      CHAIN_ID: '0x' + (10242).toString(16),
       RPC_URL: 'https://rpc.asimov.genlayer.com',
       STUDIO_URL: 'https://studio.genlayer.com',
     };
@@ -54,7 +53,7 @@
     const CONFIG = {
       MAX_PLAYERS: 5,
       MIN_PLAYERS: 2,
-      ENTRY_FEE: 0.000,
+      ENTRY_FEE: 0,  // 设为0，无需支付GEN币
       WINNER_REWARD_PERCENT: 80,
       MIN_GAME_DURATION: 60,
       MAX_GAME_DURATION: 10 * 60,
@@ -62,9 +61,11 @@
       WINNER_EXP: 100,
       CORRECT_VOTER_EXP: 30,
       PARTICIPANT_EXP: 10,
+      ROOM_EXPIRE_HOURS: 2, // 房间过期时间（小时）
     };
 
-    const STORAGE_KEY = 'consensus_gallery_v5';
+    // 更新版本号，清除旧数据
+    const STORAGE_KEY = 'consensus_gallery_v8';
 
     const ART_COLLECTION = [
       { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
@@ -95,9 +96,48 @@
     const getArt = (id) => ART_COLLECTION.find(a => a.id === id) || ART_COLLECTION[0];
     const getRandomArt = () => ART_COLLECTION[Math.floor(Math.random() * ART_COLLECTION.length)];
 
-    const getStorage = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; } catch { return null; } };
-    const setStorage = (data) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {} };
+    const getStorage = () => { 
+      try { 
+        return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; 
+      } catch { 
+        return null; 
+      } 
+    };
+    
+    const setStorage = (data) => { 
+      try { 
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); 
+      } catch {} 
+    };
+    
     const createInitialState = () => ({ rooms: {}, leaderboard: {}, totalGames: 0, playerIds: {} });
+
+    // 清理过期和已完成的房间
+    const cleanupRooms = (state) => {
+      const now = Date.now();
+      const expireMs = CONFIG.ROOM_EXPIRE_HOURS * 60 * 60 * 1000;
+      const cleanedRooms = {};
+      
+      Object.entries(state.rooms || {}).forEach(([id, room]) => {
+        const age = now - room.createdAt;
+        const isExpired = age > expireMs;
+        
+        // 保留：未过期的等待中房间、进行中的游戏、投票中的游戏
+        // 删除：过期的房间、已完成的房间
+        if (room.phase === 'finished') {
+          // 已完成的房间不保留
+          return;
+        }
+        if (room.phase === 'waiting' && isExpired) {
+          // 等待中但已过期的房间不保留
+          return;
+        }
+        // 保留其他房间
+        cleanedRooms[id] = room;
+      });
+      
+      return { ...state, rooms: cleanedRooms };
+    };
 
     const phaseLabels = { waiting: 'Waiting', playing: 'Playing', voting: 'Voting', finished: 'Finished' };
     const phaseColors = { waiting: '#6B7280', playing: '#10B981', voting: '#F59E0B', finished: '#8B5CF6' };
@@ -124,7 +164,10 @@
 
     function App() {
       const [wallet, setWallet] = useState({ connected: false, address: '' });
-      const [globalState, setGlobalState] = useState(() => getStorage() || createInitialState());
+      const [globalState, setGlobalState] = useState(() => {
+        const stored = getStorage();
+        return stored ? cleanupRooms(stored) : createInitialState();
+      });
       const [activeTab, setActiveTab] = useState('lobby');
       const [currentRoomId, setCurrentRoomId] = useState(null);
       const [message, setMessage] = useState('');
@@ -149,26 +192,37 @@
         return newId;
       }, [globalState.playerIds]);
 
+      // 保存状态到localStorage
       useEffect(() => { setStorage(globalState); }, [globalState]);
       
+      // 跨标签页同步 + 定期清理
       useEffect(() => {
         const handleStorage = (e) => {
           if (e.key === STORAGE_KEY && e.newValue) {
-            try { setGlobalState(JSON.parse(e.newValue)); } catch {}
+            try { 
+              setGlobalState(cleanupRooms(JSON.parse(e.newValue))); 
+            } catch {}
           }
         };
         window.addEventListener('storage', handleStorage);
+        
         const syncInterval = setInterval(() => {
           const stored = getStorage();
           if (stored) {
+            const cleaned = cleanupRooms(stored);
             const current = JSON.stringify(globalStateRef.current);
-            const storedStr = JSON.stringify(stored);
-            if (current !== storedStr) setGlobalState(stored);
+            const cleanedStr = JSON.stringify(cleaned);
+            if (current !== cleanedStr) setGlobalState(cleaned);
           }
         }, 2000);
-        return () => { window.removeEventListener('storage', handleStorage); clearInterval(syncInterval); };
+        
+        return () => { 
+          window.removeEventListener('storage', handleStorage); 
+          clearInterval(syncInterval); 
+        };
       }, []);
 
+      // 游戏计时器
       useEffect(() => {
         const timer = setInterval(() => {
           const roomId = currentRoomIdRef.current;
@@ -187,10 +241,12 @@
         return () => clearInterval(timer);
       }, []);
 
+      // 自动滚动聊天
       useEffect(() => {
         if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }, [currentRoom?.messages?.length]);
 
+      // 连接钱包
       const connectWallet = async () => {
         if (typeof window.ethereum === 'undefined') {
           setError('Please install MetaMask!');
@@ -216,6 +272,7 @@
         setProcessing(false);
       };
 
+      // 监听账户变化
       useEffect(() => {
         if (typeof window.ethereum !== 'undefined') {
           const handleAccountsChanged = async (accounts) => {
@@ -232,8 +289,16 @@
         }
       }, []);
 
+      // 发送交易（仅当需要时）
       const sendTransaction = async (toAddress, amountInEth) => {
+        // 如果金额为0或负数，跳过交易
+        if (amountInEth <= 0) {
+          console.log('Entry fee is 0, skipping transaction');
+          return 'no-transaction-needed';
+        }
+        
         if (!window.ethereum) throw new Error('MetaMask not found');
+        
         const amountWei = '0x' + Math.floor(amountInEth * 1e18).toString(16);
         const txHash = await window.ethereum.request({
           method: 'eth_sendTransaction',
@@ -246,75 +311,178 @@
         return txHash;
       };
 
+      // 创建房间
       const handleCreateRoom = async () => {
-        if (!wallet.connected) { setError('Please connect wallet first'); return; }
+        if (!wallet.connected) { 
+          setError('Please connect wallet first'); 
+          setTimeout(() => setError(''), 4000);
+          return; 
+        }
+        
         setProcessing(true);
         try {
-          await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
+          // 只有当 ENTRY_FEE > 0 时才需要等待交易
+          if (CONFIG.ENTRY_FEE > 0) {
+            const txResult = await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
+            console.log('Transaction result:', txResult);
+          }
+          
+          // 交易成功或无需交易，创建房间
           const art = getRandomArt();
           const roomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
           const room = {
-            id: roomId, gameNumber: globalState.totalGames + 1, creator: wallet.address,
-            phase: 'waiting', artId: art.id, artName: art.name, maxPlayers: CONFIG.MAX_PLAYERS,
-            players: [wallet.address], pool: CONFIG.ENTRY_FEE, messages: [], votes: {},
-            endGameVotes: [], winner: null, createdAt: Date.now(), startTime: null,
-            voteDeadline: null, locked: false,
+            id: roomId, 
+            gameNumber: globalState.totalGames + 1, 
+            creator: wallet.address,
+            phase: 'waiting', 
+            artId: art.id, 
+            artName: art.name, 
+            maxPlayers: CONFIG.MAX_PLAYERS,
+            players: [wallet.address], 
+            pool: CONFIG.ENTRY_FEE, 
+            messages: [], 
+            votes: {},
+            endGameVotes: [], 
+            winner: null, 
+            createdAt: Date.now(), 
+            startTime: null,
+            voteDeadline: null, 
+            locked: false,
           };
-          setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [roomId]: room }, totalGames: prev.totalGames + 1 }));
+          
+          setGlobalState(prev => ({ 
+            ...prev, 
+            rooms: { ...prev.rooms, [roomId]: room }, 
+            totalGames: prev.totalGames + 1 
+          }));
+          
           setCurrentRoomId(roomId);
           setActiveTab('game');
           setSuccess('Room Created!');
           setTimeout(() => setSuccess(''), 3000);
         } catch (err) {
           console.error('Create room error:', err);
-          setError(err.code === 4001 ? 'Transaction rejected' : 'Failed to create room');
+          if (err.code === 4001) {
+            setError('Transaction cancelled');
+          } else {
+            setError('Failed to create room');
+          }
           setTimeout(() => setError(''), 4000);
         }
         setProcessing(false);
       };
 
+      // 加入房间
       const handleJoinRoom = async (roomId) => {
-        if (!wallet.connected) { setError('Please connect wallet first'); return; }
+        if (!wallet.connected) { 
+          setError('Please connect wallet first'); 
+          setTimeout(() => setError(''), 4000);
+          return; 
+        }
+        
         const room = globalState.rooms[roomId];
-        if (!room || room.phase !== 'waiting' || room.locked) { setError('Room unavailable'); setTimeout(() => setError(''), 3000); return; }
-        if (room.players.length >= room.maxPlayers) { setError('Room is full'); setTimeout(() => setError(''), 3000); return; }
-        if (room.players.includes(wallet.address)) { setCurrentRoomId(roomId); setActiveTab('game'); return; }
+        if (!room || room.phase !== 'waiting' || room.locked) { 
+          setError('Room unavailable'); 
+          setTimeout(() => setError(''), 3000); 
+          return; 
+        }
+        if (room.players.length >= room.maxPlayers) { 
+          setError('Room is full'); 
+          setTimeout(() => setError(''), 3000); 
+          return; 
+        }
+        
+        // 如果已经在房间中，直接进入
+        if (room.players.includes(wallet.address)) { 
+          setCurrentRoomId(roomId); 
+          setActiveTab('game'); 
+          return; 
+        }
         
         setProcessing(true);
         try {
-          await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
+          // 只有当 ENTRY_FEE > 0 时才需要等待交易
+          if (CONFIG.ENTRY_FEE > 0) {
+            const txResult = await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
+            console.log('Transaction result:', txResult);
+          }
+          
+          // 交易成功或无需交易，加入房间
           setGlobalState(prev => {
             const r = prev.rooms[roomId];
             if (!r) return prev;
-            return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...r, players: [...r.players, wallet.address], pool: (r.pool || 0) + CONFIG.ENTRY_FEE } } };
+            return { 
+              ...prev, 
+              rooms: { 
+                ...prev.rooms, 
+                [roomId]: { 
+                  ...r, 
+                  players: [...r.players, wallet.address], 
+                  pool: (r.pool || 0) + CONFIG.ENTRY_FEE 
+                } 
+              } 
+            };
           });
+          
           setCurrentRoomId(roomId);
           setActiveTab('game');
           setSuccess('Joined Room!');
           setTimeout(() => setSuccess(''), 3000);
         } catch (err) {
           console.error('Join room error:', err);
-          setError(err.code === 4001 ? 'Transaction rejected' : 'Failed to join room');
+          if (err.code === 4001) {
+            setError('Transaction cancelled');
+          } else {
+            setError('Failed to join room');
+          }
           setTimeout(() => setError(''), 4000);
         }
         setProcessing(false);
       };
 
+      // 开始游戏
       const handleStartGame = (roomId) => {
         const room = globalState.rooms[roomId];
         if (!room || room.phase !== 'waiting' || room.players.length < CONFIG.MIN_PLAYERS) return;
-        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [roomId]: { ...prev.rooms[roomId], phase: 'playing', locked: true, startTime: Date.now() } } }));
+        setGlobalState(prev => ({ 
+          ...prev, 
+          rooms: { 
+            ...prev.rooms, 
+            [roomId]: { 
+              ...prev.rooms[roomId], 
+              phase: 'playing', 
+              locked: true, 
+              startTime: Date.now() 
+            } 
+          } 
+        }));
       };
 
+      // 发送消息
       const handleSendMessage = () => {
         if (!wallet.connected || !currentRoomId || !message.trim()) return;
         const room = globalState.rooms[currentRoomId];
         if (!room || room.phase !== 'playing') return;
-        const newMessage = { id: Date.now(), author: wallet.address, content: message.trim(), timestamp: Date.now() };
-        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, messages: [...room.messages, newMessage] } } }));
+        const newMessage = { 
+          id: Date.now(), 
+          author: wallet.address, 
+          content: message.trim(), 
+          timestamp: Date.now() 
+        };
+        setGlobalState(prev => ({ 
+          ...prev, 
+          rooms: { 
+            ...prev.rooms, 
+            [currentRoomId]: { 
+              ...room, 
+              messages: [...room.messages, newMessage] 
+            } 
+          } 
+        }));
         setMessage('');
       };
 
+      // 投票结束游戏
       const handleVoteEndGame = () => {
         if (!wallet.connected || !currentRoomId) return;
         const room = globalState.rooms[currentRoomId];
@@ -324,29 +492,62 @@
         const newVotes = [...room.endGameVotes, wallet.address];
         const shouldEnd = newVotes.length >= Math.ceil(room.players.length / 2);
         setGlobalState(prev => ({
-          ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, endGameVotes: newVotes,
-            ...(shouldEnd ? { phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } : {}) } }
+          ...prev, 
+          rooms: { 
+            ...prev.rooms, 
+            [currentRoomId]: { 
+              ...room, 
+              endGameVotes: newVotes,
+              ...(shouldEnd ? { phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } : {}) 
+            } 
+          }
         }));
       };
 
+      // 开始投票阶段
       const handleStartVoting = (roomId) => {
         setGlobalState(prev => {
           const room = prev.rooms[roomId];
           if (!room || room.phase !== 'playing') return prev;
-          return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...room, phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } } };
+          return { 
+            ...prev, 
+            rooms: { 
+              ...prev.rooms, 
+              [roomId]: { 
+                ...room, 
+                phase: 'voting', 
+                voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 
+              } 
+            } 
+          };
         });
       };
 
+      // 投票
       const handleVote = (targetAddress) => {
         if (!wallet.connected || !currentRoomId) return;
         const room = globalState.rooms[currentRoomId];
-        if (!room || room.phase !== 'voting' || room.votes[wallet.address]) { setError('Already voted'); setTimeout(() => setError(''), 3000); return; }
+        if (!room || room.phase !== 'voting' || room.votes[wallet.address]) { 
+          setError('Already voted'); 
+          setTimeout(() => setError(''), 3000); 
+          return; 
+        }
         const newVotes = { ...room.votes, [wallet.address]: targetAddress };
         const voters = [...new Set(room.messages.map(m => m.author))];
-        if (voters.every(p => newVotes[p])) setGlobalState(prev => finalizeGameState(prev, currentRoomId, newVotes));
-        else setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, votes: newVotes } } }));
+        if (voters.every(p => newVotes[p])) {
+          setGlobalState(prev => finalizeGameState(prev, currentRoomId, newVotes));
+        } else {
+          setGlobalState(prev => ({ 
+            ...prev, 
+            rooms: { 
+              ...prev.rooms, 
+              [currentRoomId]: { ...room, votes: newVotes } 
+            } 
+          }));
+        }
       };
 
+      // 结束游戏
       const handleFinalizeGame = (roomId) => {
         setGlobalState(prev => {
           const room = prev.rooms[roomId];
@@ -355,35 +556,90 @@
         });
       };
 
+      // 计算最终结果
       const finalizeGameState = (prevState, roomId, votes) => {
         const room = prevState.rooms[roomId];
         if (!room || room.phase === 'finished') return prevState;
         const authors = [...new Set(room.messages.map(m => m.author))];
-        if (authors.length === 0) { const newRooms = { ...prevState.rooms }; delete newRooms[roomId]; return { ...prevState, rooms: newRooms }; }
-        const voteCount = {}; authors.forEach(addr => { voteCount[addr] = 0; });
-        Object.values(votes).forEach(target => { if (voteCount[target] !== undefined) voteCount[target]++; });
+        if (authors.length === 0) { 
+          const newRooms = { ...prevState.rooms }; 
+          delete newRooms[roomId]; 
+          return { ...prevState, rooms: newRooms }; 
+        }
+        const voteCount = {}; 
+        authors.forEach(addr => { voteCount[addr] = 0; });
+        Object.values(votes).forEach(target => { 
+          if (voteCount[target] !== undefined) voteCount[target]++; 
+        });
         const maxVotes = Math.max(...Object.values(voteCount), 0);
         const winners = authors.filter(addr => voteCount[addr] === maxVotes);
         const winnerAddress = winners[Math.floor(Math.random() * winners.length)];
         const pool = room.pool || (room.players.length * CONFIG.ENTRY_FEE);
         const winnerReward = pool * (CONFIG.WINNER_REWARD_PERCENT / 100);
         const newLeaderboard = JSON.parse(JSON.stringify(prevState.leaderboard));
-        if (!newLeaderboard[winnerAddress]) newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0 };
+        if (!newLeaderboard[winnerAddress]) {
+          newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0 };
+        }
         newLeaderboard[winnerAddress].experience += CONFIG.WINNER_EXP;
         newLeaderboard[winnerAddress].wins += 1;
         Object.entries(votes).forEach(([voter, target]) => {
-          if (!newLeaderboard[voter]) newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0 };
+          if (!newLeaderboard[voter]) {
+            newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0 };
+          }
           newLeaderboard[voter].experience += target === winnerAddress ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP;
           newLeaderboard[voter].participations += 1;
         });
-        return { ...prevState, leaderboard: newLeaderboard, rooms: { ...prevState.rooms, [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount, winnerReward } } };
+        return { 
+          ...prevState, 
+          leaderboard: newLeaderboard, 
+          rooms: { 
+            ...prevState.rooms, 
+            [roomId]: { 
+              ...room, 
+              phase: 'finished', 
+              votes, 
+              winner: winnerAddress, 
+              voteCount, 
+              winnerReward 
+            } 
+          } 
+        };
       };
 
-      const handleLeaveRoom = () => { setCurrentRoomId(null); setActiveTab('lobby'); setMessage(''); };
+      // 离开房间
+      const handleLeaveRoom = () => { 
+        setCurrentRoomId(null); 
+        setActiveTab('lobby'); 
+        setMessage(''); 
+      };
 
-      const availableRooms = useMemo(() => Object.values(globalState.rooms).filter(r => r.phase === 'waiting' && !r.locked && r.players.length < r.maxPlayers), [globalState.rooms]);
-      const myRooms = useMemo(() => Object.values(globalState.rooms).filter(r => wallet.connected && r.players.includes(wallet.address) && r.phase !== 'finished'), [globalState.rooms, wallet]);
-      const sortedLeaderboard = useMemo(() => Object.entries(globalState.leaderboard).map(([address, stats]) => ({ address, playerId: globalState.playerIds[address] || generatePlayerId(address), ...stats })).filter(p => p.participations > 0 || p.experience > 0).sort((a, b) => b.experience - a.experience), [globalState.leaderboard, globalState.playerIds]);
+      // 可加入的房间（其他玩家创建的等待中房间）
+      const availableRooms = useMemo(() => 
+        Object.values(globalState.rooms).filter(r => 
+          r.phase === 'waiting' && 
+          !r.locked && 
+          r.players.length < r.maxPlayers
+        ), [globalState.rooms]);
+      
+      // 我的房间
+      const myRooms = useMemo(() => 
+        Object.values(globalState.rooms).filter(r => 
+          wallet.connected && 
+          r.players.includes(wallet.address) && 
+          r.phase !== 'finished'
+        ), [globalState.rooms, wallet]);
+      
+      // 排行榜
+      const sortedLeaderboard = useMemo(() => 
+        Object.entries(globalState.leaderboard)
+          .map(([address, stats]) => ({ 
+            address, 
+            playerId: globalState.playerIds[address] || generatePlayerId(address), 
+            ...stats 
+          }))
+          .filter(p => p.participations > 0 || p.experience > 0)
+          .sort((a, b) => b.experience - a.experience), 
+        [globalState.leaderboard, globalState.playerIds]);
 
       const gameElapsed = currentRoom?.startTime ? Math.floor((Date.now() - currentRoom.startTime) / 1000) : 0;
       const canVoteEnd = currentRoom?.phase === 'playing' && gameElapsed >= CONFIG.MIN_GAME_DURATION;
@@ -414,11 +670,15 @@
             </div>
           </header>
 
-          {error && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-red-500/90 text-white rounded-lg shadow-lg animate-fade-in flex items-center gap-3"><span>{error}</span><button onClick={() => setError('')}>✕</button></div>}
+          {error && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-red-500/90 text-white rounded-lg shadow-lg animate-fade-in flex items-center gap-3 max-w-md"><span className="text-sm">{error}</span><button onClick={() => setError('')} className="ml-2">✕</button></div>}
           {success && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-green-500/90 text-white rounded-lg shadow-lg animate-fade-in">✓ {success}</div>}
 
           <nav className="flex gap-1 px-4 md:px-6 py-3 border-b border-white/5 overflow-x-auto">
-            {[{ id: 'lobby', icon: '🏠', label: 'Lobby' }, { id: 'game', icon: '🎮', label: 'Game', badge: myRooms.length > 0 ? myRooms.length : null }, { id: 'leaderboard', icon: '🏆', label: 'Leaderboard' }].map(tab => (
+            {[
+              { id: 'lobby', icon: '🏠', label: 'Lobby' }, 
+              { id: 'game', icon: '🎮', label: 'Game', badge: myRooms.length > 0 ? myRooms.length : null }, 
+              { id: 'leaderboard', icon: '🏆', label: 'Leaderboard' }
+            ].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap ${activeTab === tab.id ? 'bg-primary-500/20 border border-primary-500/50 text-primary-300' : 'text-gray-400 hover:bg-white/5'}`}>
                 <span>{tab.icon}</span><span className="hidden sm:inline">{tab.label}</span>
                 {tab.badge && <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full">{tab.badge}</span>}
@@ -445,13 +705,15 @@
                   </div>
                 ) : (
                   <>
+                    {/* 创建游戏 */}
                     <div className="glass rounded-2xl p-6">
-                      <h3 className="text-lg font-semibold mb-4">🎮 Create Game</h3>
+                      <h3 className="text-lg font-semibold mb-4">🎮 Create New Game</h3>
                       <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
-                        {processing ? <><Spinner /> Processing...</> : '✨ Create Room'}
+                        {processing ? <><Spinner /> Creating...</> : '✨ Create Room'}
                       </button>
                     </div>
 
+                    {/* 可加入的房间列表 */}
                     <div className="glass rounded-2xl p-6">
                       <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({availableRooms.length})</h3>
                       {availableRooms.length === 0 ? (
@@ -464,7 +726,10 @@
                                 <ArtDisplay artId={room.artId} size={60} />
                                 <div>
                                   <div className="font-medium">{room.artName}</div>
-                                  <div className="text-sm text-gray-400">👥 {room.players?.length || 0}/{room.maxPlayers}</div>
+                                  <div className="text-sm text-gray-400">
+                                    👥 {room.players?.length || 0}/{room.maxPlayers} • 
+                                    Host: {globalState.playerIds[room.creator] || generatePlayerId(room.creator)}
+                                  </div>
                                 </div>
                               </div>
                               <button onClick={() => handleJoinRoom(room.id)} disabled={processing} className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">
@@ -476,6 +741,7 @@
                       )}
                     </div>
 
+                    {/* 我的游戏 */}
                     {myRooms.length > 0 && (
                       <div className="glass rounded-2xl p-6 border-primary-500/30">
                         <h3 className="text-lg font-semibold mb-4 text-primary-300">⏳ My Games</h3>
@@ -486,10 +752,14 @@
                                 <ArtDisplay artId={room.artId} size={50} />
                                 <div>
                                   <div className="font-medium text-sm">{room.artName}</div>
-                                  <div className="text-xs text-gray-400">{phaseLabels[room.phase]}</div>
+                                  <div className="text-xs text-gray-400">
+                                    {phaseLabels[room.phase]} • 👥 {room.players?.length || 0}/{room.maxPlayers}
+                                  </div>
                                 </div>
                               </div>
-                              <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }} className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">Enter</button>
+                              <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }} className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">
+                                Enter
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -502,7 +772,7 @@
                   <div className="glass rounded-xl p-4 text-center">
                     <div className="text-2xl mb-1">🎮</div>
                     <div className="text-2xl font-bold">{globalState.totalGames}</div>
-                    <div className="text-xs text-gray-500">Games</div>
+                    <div className="text-xs text-gray-500">Total Games</div>
                   </div>
                   <div className="glass rounded-xl p-4 text-center">
                     <div className="text-2xl mb-1">👥</div>
@@ -546,14 +816,22 @@
                               {currentRoom.players?.map(addr => (
                                 <span key={addr} className={`px-2 py-1 rounded text-xs ${addr === wallet.address ? 'bg-primary-500/30 text-primary-300' : 'bg-white/10'}`}>
                                   {globalState.playerIds[addr] || generatePlayerId(addr)}
+                                  {addr === currentRoom.creator && ' 👑'}
                                 </span>
                               ))}
                             </div>
                             {currentRoom.creator === wallet.address && currentRoom.players?.length >= CONFIG.MIN_PLAYERS && (
-                              <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">🚀 Start Game</button>
+                              <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">
+                                🚀 Start Game
+                              </button>
                             )}
                             {(currentRoom.players?.length || 0) < CONFIG.MIN_PLAYERS && (
-                              <p className="text-sm text-yellow-500 mt-3">Need {CONFIG.MIN_PLAYERS - (currentRoom.players?.length || 0)} more player(s)</p>
+                              <p className="text-sm text-yellow-500 mt-3">
+                                Waiting for {CONFIG.MIN_PLAYERS - (currentRoom.players?.length || 0)} more player(s)...
+                              </p>
+                            )}
+                            {currentRoom.creator !== wallet.address && (
+                              <p className="text-sm text-gray-400 mt-3">Waiting for host to start...</p>
                             )}
                           </div>
                         )}
