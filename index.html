@@ -44,7 +44,9 @@
 
     const CONTRACT = {
       ADDRESS: '0x5c2F525BA54839338F9BC9Cd8DF7B656FBc5E7d0',
-      NETWORK: 'studionet',
+      NETWORK: 'GenLayer Asimov Testnet',
+      CHAIN_ID: '0x' + (10242).toString(16), // Asimov Testnet Chain ID
+      RPC_URL: 'https://rpc.asimov.genlayer.com',
       STUDIO_URL: 'https://studio.genlayer.com',
     };
 
@@ -61,7 +63,7 @@
       PARTICIPANT_EXP: 10,
     };
 
-    const STORAGE_KEY = 'consensus_gallery_v3';
+    const STORAGE_KEY = 'consensus_gallery_v4';
 
     const ART_COLLECTION = [
       { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
@@ -120,7 +122,7 @@
     };
 
     function App() {
-      const [wallet, setWallet] = useState({ connected: false, address: '', balance: '0' });
+      const [wallet, setWallet] = useState({ connected: false, address: '' });
       const [globalState, setGlobalState] = useState(() => getStorage() || createInitialState());
       const [activeTab, setActiveTab] = useState('lobby');
       const [currentRoomId, setCurrentRoomId] = useState(null);
@@ -146,10 +148,8 @@
         return newId;
       }, [globalState.playerIds]);
 
-      // Save state to localStorage
       useEffect(() => { setStorage(globalState); }, [globalState]);
       
-      // Sync with other tabs (reduced frequency for stability)
       useEffect(() => {
         const handleStorage = (e) => {
           if (e.key === STORAGE_KEY && e.newValue) {
@@ -157,57 +157,70 @@
           }
         };
         window.addEventListener('storage', handleStorage);
-        
-        // Reduced sync interval for stability
         const syncInterval = setInterval(() => {
           const stored = getStorage();
           if (stored) {
             const current = JSON.stringify(globalStateRef.current);
             const storedStr = JSON.stringify(stored);
-            if (current !== storedStr) {
-              setGlobalState(stored);
-            }
+            if (current !== storedStr) setGlobalState(stored);
           }
-        }, 2000); // Changed from 500ms to 2000ms
-        
-        return () => { 
-          window.removeEventListener('storage', handleStorage); 
-          clearInterval(syncInterval); 
-        };
+        }, 2000);
+        return () => { window.removeEventListener('storage', handleStorage); clearInterval(syncInterval); };
       }, []);
 
-      // Game timer
       useEffect(() => {
         const timer = setInterval(() => {
           const roomId = currentRoomIdRef.current;
           if (!roomId) return;
           const room = globalStateRef.current.rooms[roomId];
-          if (!room || room.phase === 'finished' || room.phase === 'waiting') { 
-            setTimeLeft(0); 
-            return; 
-          }
+          if (!room || room.phase === 'finished' || room.phase === 'waiting') { setTimeLeft(0); return; }
           const now = Date.now();
           const elapsed = Math.floor((now - room.startTime) / 1000);
           const remaining = room.phase === 'voting' 
             ? Math.max(0, Math.floor((room.voteDeadline - now) / 1000))
             : CONFIG.MAX_GAME_DURATION - elapsed;
           setTimeLeft(Math.max(0, remaining));
-          
-          if (room.phase === 'playing' && elapsed >= CONFIG.MAX_GAME_DURATION) {
-            handleStartVoting(roomId);
-          } else if (room.phase === 'voting' && remaining <= 0) {
-            handleFinalizeGame(roomId);
-          }
+          if (room.phase === 'playing' && elapsed >= CONFIG.MAX_GAME_DURATION) handleStartVoting(roomId);
+          else if (room.phase === 'voting' && remaining <= 0) handleFinalizeGame(roomId);
         }, 1000);
         return () => clearInterval(timer);
       }, []);
 
-      // Auto scroll chat
       useEffect(() => {
         if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }, [currentRoom?.messages?.length]);
 
-      // Connect MetaMask wallet
+      // Switch to Asimov Testnet
+      const switchToAsimov = async () => {
+        try {
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: CONTRACT.CHAIN_ID }],
+          });
+          return true;
+        } catch (switchError) {
+          if (switchError.code === 4902) {
+            try {
+              await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [{
+                  chainId: CONTRACT.CHAIN_ID,
+                  chainName: CONTRACT.NETWORK,
+                  rpcUrls: [CONTRACT.RPC_URL],
+                  nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+                }],
+              });
+              return true;
+            } catch (addError) {
+              console.error('Failed to add network:', addError);
+              return false;
+            }
+          }
+          console.error('Failed to switch network:', switchError);
+          return false;
+        }
+      };
+
       const connectWallet = async () => {
         if (typeof window.ethereum === 'undefined') {
           setError('Please install MetaMask to play!');
@@ -221,15 +234,10 @@
           if (accounts && accounts.length > 0) {
             const addr = accounts[0];
             
-            // Get balance
-            const balanceHex = await window.ethereum.request({
-              method: 'eth_getBalance',
-              params: [addr, 'latest']
-            });
-            const balanceWei = parseInt(balanceHex, 16);
-            const balanceEth = (balanceWei / 1e18).toFixed(4);
+            // Switch to Asimov Testnet
+            await switchToAsimov();
             
-            setWallet({ connected: true, address: addr, balance: balanceEth });
+            setWallet({ connected: true, address: addr });
             getPlayerId(addr);
             setSuccess('Wallet Connected!');
             setTimeout(() => setSuccess(''), 3000);
@@ -242,161 +250,90 @@
         setProcessing(false);
       };
 
-      // Listen for account changes
       useEffect(() => {
         if (typeof window.ethereum !== 'undefined') {
           const handleAccountsChanged = async (accounts) => {
             if (accounts.length === 0) {
-              setWallet({ connected: false, address: '', balance: '0' });
+              setWallet({ connected: false, address: '' });
             } else {
               const addr = accounts[0];
-              const balanceHex = await window.ethereum.request({
-                method: 'eth_getBalance',
-                params: [addr, 'latest']
-              });
-              const balanceWei = parseInt(balanceHex, 16);
-              const balanceEth = (balanceWei / 1e18).toFixed(4);
-              setWallet({ connected: true, address: addr, balance: balanceEth });
+              setWallet({ connected: true, address: addr });
               getPlayerId(addr);
             }
           };
-          
           window.ethereum.on('accountsChanged', handleAccountsChanged);
           return () => window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
         }
       }, []);
 
-      // Send transaction via MetaMask
       const sendTransaction = async (toAddress, amountInEth) => {
         if (!window.ethereum) throw new Error('MetaMask not found');
         
-        const amountWei = '0x' + Math.floor(amountInEth * 1e18).toString(16);
+        // Ensure on correct network
+        await switchToAsimov();
         
+        const amountWei = '0x' + Math.floor(amountInEth * 1e18).toString(16);
         const txHash = await window.ethereum.request({
           method: 'eth_sendTransaction',
           params: [{
             from: wallet.address,
             to: toAddress,
             value: amountWei,
-            gas: '0x5208', // 21000
+            gas: '0x5208',
           }],
         });
-        
         return txHash;
       };
 
-      // Create room with payment
       const handleCreateRoom = async () => {
-        if (!wallet.connected) {
-          setError('Please connect wallet first');
-          return;
-        }
-        
+        if (!wallet.connected) { setError('Please connect wallet first'); return; }
         setProcessing(true);
         try {
-          // Send entry fee to contract
           await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
-          
           const art = getRandomArt();
           const roomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
           const room = {
-            id: roomId,
-            gameNumber: globalState.totalGames + 1,
-            creator: wallet.address,
-            phase: 'waiting',
-            artId: art.id,
-            artName: art.name,
-            maxPlayers: CONFIG.MAX_PLAYERS,
-            players: [wallet.address],
-            pool: CONFIG.ENTRY_FEE,
-            messages: [],
-            votes: {},
-            endGameVotes: [],
-            winner: null,
-            createdAt: Date.now(),
-            startTime: null,
-            voteDeadline: null,
-            locked: false,
+            id: roomId, gameNumber: globalState.totalGames + 1, creator: wallet.address,
+            phase: 'waiting', artId: art.id, artName: art.name, maxPlayers: CONFIG.MAX_PLAYERS,
+            players: [wallet.address], pool: CONFIG.ENTRY_FEE, messages: [], votes: {},
+            endGameVotes: [], winner: null, createdAt: Date.now(), startTime: null,
+            voteDeadline: null, locked: false,
           };
-          
-          setGlobalState(prev => ({ 
-            ...prev, 
-            rooms: { ...prev.rooms, [roomId]: room }, 
-            totalGames: prev.totalGames + 1 
-          }));
-          
+          setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [roomId]: room }, totalGames: prev.totalGames + 1 }));
           setCurrentRoomId(roomId);
           setActiveTab('game');
-          setSuccess('Room Created! Payment confirmed.');
+          setSuccess('Room Created!');
           setTimeout(() => setSuccess(''), 3000);
         } catch (err) {
           console.error('Create room error:', err);
-          if (err.code === 4001) {
-            setError('Transaction rejected by user');
-          } else {
-            setError('Failed to create room: ' + (err.message || 'Unknown error'));
-          }
+          setError(err.code === 4001 ? 'Transaction rejected' : 'Failed to create room');
           setTimeout(() => setError(''), 4000);
         }
         setProcessing(false);
       };
 
-      // Join room with payment
       const handleJoinRoom = async (roomId) => {
-        if (!wallet.connected) {
-          setError('Please connect wallet first');
-          return;
-        }
-        
+        if (!wallet.connected) { setError('Please connect wallet first'); return; }
         const room = globalState.rooms[roomId];
-        if (!room || room.phase !== 'waiting' || room.locked) {
-          setError('Room unavailable');
-          setTimeout(() => setError(''), 3000);
-          return;
-        }
-        if (room.players.length >= room.maxPlayers) {
-          setError('Room is full');
-          setTimeout(() => setError(''), 3000);
-          return;
-        }
-        if (room.players.includes(wallet.address)) {
-          setCurrentRoomId(roomId);
-          setActiveTab('game');
-          return;
-        }
+        if (!room || room.phase !== 'waiting' || room.locked) { setError('Room unavailable'); setTimeout(() => setError(''), 3000); return; }
+        if (room.players.length >= room.maxPlayers) { setError('Room is full'); setTimeout(() => setError(''), 3000); return; }
+        if (room.players.includes(wallet.address)) { setCurrentRoomId(roomId); setActiveTab('game'); return; }
         
         setProcessing(true);
         try {
-          // Send entry fee to contract
           await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
-          
           setGlobalState(prev => {
             const r = prev.rooms[roomId];
             if (!r) return prev;
-            return { 
-              ...prev, 
-              rooms: { 
-                ...prev.rooms, 
-                [roomId]: { 
-                  ...r, 
-                  players: [...r.players, wallet.address], 
-                  pool: (r.pool || 0) + CONFIG.ENTRY_FEE 
-                } 
-              } 
-            };
+            return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...r, players: [...r.players, wallet.address], pool: (r.pool || 0) + CONFIG.ENTRY_FEE } } };
           });
-          
           setCurrentRoomId(roomId);
           setActiveTab('game');
-          setSuccess('Joined Room! Payment confirmed.');
+          setSuccess('Joined Room!');
           setTimeout(() => setSuccess(''), 3000);
         } catch (err) {
           console.error('Join room error:', err);
-          if (err.code === 4001) {
-            setError('Transaction rejected by user');
-          } else {
-            setError('Failed to join room: ' + (err.message || 'Unknown error'));
-          }
+          setError(err.code === 4001 ? 'Transaction rejected' : 'Failed to join room');
           setTimeout(() => setError(''), 4000);
         }
         setProcessing(false);
@@ -405,13 +342,7 @@
       const handleStartGame = (roomId) => {
         const room = globalState.rooms[roomId];
         if (!room || room.phase !== 'waiting' || room.players.length < CONFIG.MIN_PLAYERS) return;
-        setGlobalState(prev => ({ 
-          ...prev, 
-          rooms: { 
-            ...prev.rooms, 
-            [roomId]: { ...prev.rooms[roomId], phase: 'playing', locked: true, startTime: Date.now() } 
-          } 
-        }));
+        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [roomId]: { ...prev.rooms[roomId], phase: 'playing', locked: true, startTime: Date.now() } } }));
       };
 
       const handleSendMessage = () => {
@@ -419,10 +350,7 @@
         const room = globalState.rooms[currentRoomId];
         if (!room || room.phase !== 'playing') return;
         const newMessage = { id: Date.now(), author: wallet.address, content: message.trim(), timestamp: Date.now() };
-        setGlobalState(prev => ({ 
-          ...prev, 
-          rooms: { ...prev.rooms, [currentRoomId]: { ...room, messages: [...room.messages, newMessage] } } 
-        }));
+        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, messages: [...room.messages, newMessage] } } }));
         setMessage('');
       };
 
@@ -435,15 +363,8 @@
         const newVotes = [...room.endGameVotes, wallet.address];
         const shouldEnd = newVotes.length >= Math.ceil(room.players.length / 2);
         setGlobalState(prev => ({
-          ...prev, 
-          rooms: { 
-            ...prev.rooms, 
-            [currentRoomId]: { 
-              ...room, 
-              endGameVotes: newVotes,
-              ...(shouldEnd ? { phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } : {}) 
-            } 
-          }
+          ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, endGameVotes: newVotes,
+            ...(shouldEnd ? { phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } : {}) } }
         }));
       };
 
@@ -451,28 +372,18 @@
         setGlobalState(prev => {
           const room = prev.rooms[roomId];
           if (!room || room.phase !== 'playing') return prev;
-          return { 
-            ...prev, 
-            rooms: { ...prev.rooms, [roomId]: { ...room, phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } } 
-          };
+          return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...room, phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } } };
         });
       };
 
       const handleVote = (targetAddress) => {
         if (!wallet.connected || !currentRoomId) return;
         const room = globalState.rooms[currentRoomId];
-        if (!room || room.phase !== 'voting' || room.votes[wallet.address]) { 
-          setError('Already voted'); 
-          setTimeout(() => setError(''), 3000);
-          return; 
-        }
+        if (!room || room.phase !== 'voting' || room.votes[wallet.address]) { setError('Already voted'); setTimeout(() => setError(''), 3000); return; }
         const newVotes = { ...room.votes, [wallet.address]: targetAddress };
         const voters = [...new Set(room.messages.map(m => m.author))];
-        if (voters.every(p => newVotes[p])) {
-          setGlobalState(prev => finalizeGameState(prev, currentRoomId, newVotes));
-        } else {
-          setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, votes: newVotes } } }));
-        }
+        if (voters.every(p => newVotes[p])) setGlobalState(prev => finalizeGameState(prev, currentRoomId, newVotes));
+        else setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, votes: newVotes } } }));
       };
 
       const handleFinalizeGame = (roomId) => {
@@ -486,75 +397,32 @@
       const finalizeGameState = (prevState, roomId, votes) => {
         const room = prevState.rooms[roomId];
         if (!room || room.phase === 'finished') return prevState;
-        
         const authors = [...new Set(room.messages.map(m => m.author))];
-        if (authors.length === 0) {
-          const newRooms = { ...prevState.rooms }; 
-          delete newRooms[roomId];
-          return { ...prevState, rooms: newRooms };
-        }
-        
-        const voteCount = {}; 
-        authors.forEach(addr => { voteCount[addr] = 0; });
-        Object.values(votes).forEach(target => { 
-          if (voteCount[target] !== undefined) voteCount[target]++; 
-        });
-        
+        if (authors.length === 0) { const newRooms = { ...prevState.rooms }; delete newRooms[roomId]; return { ...prevState, rooms: newRooms }; }
+        const voteCount = {}; authors.forEach(addr => { voteCount[addr] = 0; });
+        Object.values(votes).forEach(target => { if (voteCount[target] !== undefined) voteCount[target]++; });
         const maxVotes = Math.max(...Object.values(voteCount), 0);
         const winners = authors.filter(addr => voteCount[addr] === maxVotes);
         const winnerAddress = winners[Math.floor(Math.random() * winners.length)];
-        
         const pool = room.pool || (room.players.length * CONFIG.ENTRY_FEE);
         const winnerReward = pool * (CONFIG.WINNER_REWARD_PERCENT / 100);
-        
         const newLeaderboard = JSON.parse(JSON.stringify(prevState.leaderboard));
-        if (!newLeaderboard[winnerAddress]) {
-          newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0 };
-        }
+        if (!newLeaderboard[winnerAddress]) newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0 };
         newLeaderboard[winnerAddress].experience += CONFIG.WINNER_EXP;
         newLeaderboard[winnerAddress].wins += 1;
-        
         Object.entries(votes).forEach(([voter, target]) => {
-          if (!newLeaderboard[voter]) {
-            newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0 };
-          }
+          if (!newLeaderboard[voter]) newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0 };
           newLeaderboard[voter].experience += target === winnerAddress ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP;
           newLeaderboard[voter].participations += 1;
         });
-        
-        return { 
-          ...prevState, 
-          leaderboard: newLeaderboard, 
-          rooms: { 
-            ...prevState.rooms, 
-            [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount, winnerReward } 
-          } 
-        };
+        return { ...prevState, leaderboard: newLeaderboard, rooms: { ...prevState.rooms, [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount, winnerReward } } };
       };
 
-      const handleLeaveRoom = () => { 
-        setCurrentRoomId(null); 
-        setActiveTab('lobby'); 
-        setMessage(''); 
-      };
+      const handleLeaveRoom = () => { setCurrentRoomId(null); setActiveTab('lobby'); setMessage(''); };
 
-      const availableRooms = useMemo(() => 
-        Object.values(globalState.rooms).filter(r => r.phase === 'waiting' && !r.locked && r.players.length < r.maxPlayers), 
-        [globalState.rooms]
-      );
-      
-      const myRooms = useMemo(() => 
-        Object.values(globalState.rooms).filter(r => wallet.connected && r.players.includes(wallet.address) && r.phase !== 'finished'), 
-        [globalState.rooms, wallet]
-      );
-      
-      const sortedLeaderboard = useMemo(() => 
-        Object.entries(globalState.leaderboard)
-          .map(([address, stats]) => ({ address, playerId: globalState.playerIds[address] || generatePlayerId(address), ...stats }))
-          .filter(p => p.participations > 0 || p.experience > 0)
-          .sort((a, b) => b.experience - a.experience), 
-        [globalState.leaderboard, globalState.playerIds]
-      );
+      const availableRooms = useMemo(() => Object.values(globalState.rooms).filter(r => r.phase === 'waiting' && !r.locked && r.players.length < r.maxPlayers), [globalState.rooms]);
+      const myRooms = useMemo(() => Object.values(globalState.rooms).filter(r => wallet.connected && r.players.includes(wallet.address) && r.phase !== 'finished'), [globalState.rooms, wallet]);
+      const sortedLeaderboard = useMemo(() => Object.entries(globalState.leaderboard).map(([address, stats]) => ({ address, playerId: globalState.playerIds[address] || generatePlayerId(address), ...stats })).filter(p => p.participations > 0 || p.experience > 0).sort((a, b) => b.experience - a.experience), [globalState.leaderboard, globalState.playerIds]);
 
       const gameElapsed = currentRoom?.startTime ? Math.floor((Date.now() - currentRoom.startTime) / 1000) : 0;
       const canVoteEnd = currentRoom?.phase === 'playing' && gameElapsed >= CONFIG.MIN_GAME_DURATION;
@@ -564,27 +432,18 @@
 
       return (
         <div className="min-h-screen text-gray-200">
-          {/* Header */}
           <header className="flex justify-between items-center px-4 md:px-6 py-4 border-b border-white/10">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl btn-primary">🎨</div>
-              <div>
-                <h1 className="text-lg md:text-xl font-bold gradient-text">Consensus Gallery</h1>
-                <p className="text-xs text-gray-500">{CONTRACT.NETWORK} • Entry: {CONFIG.ENTRY_FEE} GEN</p>
-              </div>
+              <h1 className="text-lg md:text-xl font-bold gradient-text">Consensus Gallery</h1>
             </div>
             <div className="flex items-center gap-2">
               {wallet.connected ? (
-                <div className="flex flex-col items-end gap-1 px-3 py-2 glass rounded-xl">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                    <span className="text-xs md:text-sm font-medium">{myPlayerId}</span>
-                    <span className="px-2 py-0.5 bg-primary-500/30 rounded text-xs font-bold text-primary-300">{myXP} XP</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-gray-500 font-mono">{shortenAddress(wallet.address)}</span>
-                    <span className="px-2 py-0.5 bg-yellow-500/20 rounded text-xs font-bold text-yellow-400">💰 {wallet.balance} ETH</span>
-                  </div>
+                <div className="flex items-center gap-2 px-3 py-2 glass rounded-xl">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-xs md:text-sm font-medium">{myPlayerId}</span>
+                  <span className="px-2 py-0.5 bg-primary-500/30 rounded text-xs font-bold text-primary-300">{myXP} XP</span>
+                  <span className="text-[10px] text-gray-500 font-mono hidden sm:inline">{shortenAddress(wallet.address)}</span>
                 </div>
               ) : (
                 <button onClick={connectWallet} disabled={processing} className="btn-primary px-4 py-2 rounded-xl text-white text-sm font-semibold flex items-center gap-2">
@@ -594,46 +453,24 @@
             </div>
           </header>
 
-          {/* Notifications */}
-          {error && (
-            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-red-500/90 text-white rounded-lg shadow-lg animate-fade-in flex items-center gap-3">
-              <span>{error}</span>
-              <button onClick={() => setError('')}>✕</button>
-            </div>
-          )}
-          {success && (
-            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-green-500/90 text-white rounded-lg shadow-lg animate-fade-in">
-              ✓ {success}
-            </div>
-          )}
+          {error && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-red-500/90 text-white rounded-lg shadow-lg animate-fade-in flex items-center gap-3"><span>{error}</span><button onClick={() => setError('')}>✕</button></div>}
+          {success && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-green-500/90 text-white rounded-lg shadow-lg animate-fade-in">✓ {success}</div>}
 
-          {/* Navigation */}
           <nav className="flex gap-1 px-4 md:px-6 py-3 border-b border-white/5 overflow-x-auto">
-            {[
-              { id: 'lobby', icon: '🏠', label: 'Lobby' }, 
-              { id: 'game', icon: '🎮', label: 'Game', badge: myRooms.length > 0 ? myRooms.length : null }, 
-              { id: 'leaderboard', icon: '🏆', label: 'Leaderboard' }
-            ].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} 
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap ${
-                  activeTab === tab.id ? 'bg-primary-500/20 border border-primary-500/50 text-primary-300' : 'text-gray-400 hover:bg-white/5'
-                }`}>
-                <span>{tab.icon}</span>
-                <span className="hidden sm:inline">{tab.label}</span>
+            {[{ id: 'lobby', icon: '🏠', label: 'Lobby' }, { id: 'game', icon: '🎮', label: 'Game', badge: myRooms.length > 0 ? myRooms.length : null }, { id: 'leaderboard', icon: '🏆', label: 'Leaderboard' }].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap ${activeTab === tab.id ? 'bg-primary-500/20 border border-primary-500/50 text-primary-300' : 'text-gray-400 hover:bg-white/5'}`}>
+                <span>{tab.icon}</span><span className="hidden sm:inline">{tab.label}</span>
                 {tab.badge && <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full">{tab.badge}</span>}
               </button>
             ))}
           </nav>
 
-          {/* Main Content */}
           <main className="px-4 md:px-6 py-6 max-w-6xl mx-auto">
-            
-            {/* Lobby */}
             {activeTab === 'lobby' && (
               <div className="space-y-6 animate-fade-in">
                 <div className="text-center py-6">
                   <h2 className="text-2xl md:text-3xl font-bold gradient-text mb-2">Consensus Gallery</h2>
-                  <p className="text-gray-400">Art Description Game • Win GEN!</p>
+                  <p className="text-gray-400">Art Description Game</p>
                 </div>
                 
                 {!wallet.connected ? (
@@ -647,17 +484,13 @@
                   </div>
                 ) : (
                   <>
-                    {/* Create Game */}
                     <div className="glass rounded-2xl p-6">
                       <h3 className="text-lg font-semibold mb-4">🎮 Create Game</h3>
-                      <button onClick={handleCreateRoom} disabled={processing} 
-                        className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
+                      <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
                         {processing ? <><Spinner /> Processing...</> : '✨ Create Room'}
                       </button>
-                      <p className="text-xs text-gray-500 mt-3 text-center">Entry fee: {CONFIG.ENTRY_FEE} GEN • Winner gets {CONFIG.WINNER_REWARD_PERCENT}% of pool</p>
                     </div>
 
-                    {/* Available Rooms */}
                     <div className="glass rounded-2xl p-6">
                       <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({availableRooms.length})</h3>
                       {availableRooms.length === 0 ? (
@@ -670,13 +503,10 @@
                                 <ArtDisplay artId={room.artId} size={60} />
                                 <div>
                                   <div className="font-medium">{room.artName}</div>
-                                  <div className="text-sm text-gray-400">
-                                    👥 {room.players?.length || 0}/{room.maxPlayers} • 💰 {formatGEN(room.pool || CONFIG.ENTRY_FEE)} GEN
-                                  </div>
+                                  <div className="text-sm text-gray-400">👥 {room.players?.length || 0}/{room.maxPlayers}</div>
                                 </div>
                               </div>
-                              <button onClick={() => handleJoinRoom(room.id)} disabled={processing}
-                                className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">
+                              <button onClick={() => handleJoinRoom(room.id)} disabled={processing} className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">
                                 {processing ? <Spinner /> : 'Join'}
                               </button>
                             </div>
@@ -685,7 +515,6 @@
                       )}
                     </div>
 
-                    {/* My Rooms */}
                     {myRooms.length > 0 && (
                       <div className="glass rounded-2xl p-6 border-primary-500/30">
                         <h3 className="text-lg font-semibold mb-4 text-primary-300">⏳ My Games</h3>
@@ -696,11 +525,10 @@
                                 <ArtDisplay artId={room.artId} size={50} />
                                 <div>
                                   <div className="font-medium text-sm">{room.artName}</div>
-                                  <div className="text-xs text-gray-400">{phaseLabels[room.phase]} • 💰 {formatGEN(room.pool || 0)} GEN</div>
+                                  <div className="text-xs text-gray-400">{phaseLabels[room.phase]}</div>
                                 </div>
                               </div>
-                              <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }} 
-                                className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">Enter</button>
+                              <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }} className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">Enter</button>
                             </div>
                           ))}
                         </div>
@@ -709,8 +537,7 @@
                   </>
                 )}
 
-                {/* Stats */}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div className="glass rounded-xl p-4 text-center">
                     <div className="text-2xl mb-1">🎮</div>
                     <div className="text-2xl font-bold">{globalState.totalGames}</div>
@@ -721,16 +548,10 @@
                     <div className="text-2xl font-bold">{Object.keys(globalState.leaderboard).length}</div>
                     <div className="text-xs text-gray-500">Players</div>
                   </div>
-                  <div className="glass rounded-xl p-4 text-center">
-                    <div className="text-2xl mb-1">💰</div>
-                    <div className="text-2xl font-bold">{CONFIG.WINNER_REWARD_PERCENT}%</div>
-                    <div className="text-xs text-gray-500">Winner Share</div>
-                  </div>
                 </div>
               </div>
             )}
 
-            {/* Game Room */}
             {activeTab === 'game' && (
               <div className="animate-fade-in">
                 {!currentRoom ? (
@@ -740,29 +561,23 @@
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Left Column */}
                     <div className="space-y-4">
                       <div className="glass rounded-xl p-4">
                         <div className="flex items-center justify-between">
-                          <span className="px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2" 
-                            style={{ background: phaseColors[currentRoom.phase] + '20', color: phaseColors[currentRoom.phase] }}>
+                          <span className="px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2" style={{ background: phaseColors[currentRoom.phase] + '20', color: phaseColors[currentRoom.phase] }}>
                             <span className="w-2 h-2 rounded-full pulse-dot" style={{ background: phaseColors[currentRoom.phase] }}></span>
                             {phaseLabels[currentRoom.phase]}
                           </span>
-                          <div className="flex items-center gap-3">
-                            <span className="text-sm text-yellow-400 font-bold">💰 {formatGEN(currentRoom.pool || 0)} GEN</span>
-                            {(currentRoom.phase === 'playing' || currentRoom.phase === 'voting') && (
-                              <div className={`px-3 py-1.5 rounded-lg ${timeLeft <= 30 ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}>
-                                <span className="text-xl font-bold font-mono">{formatTime(timeLeft)}</span>
-                              </div>
-                            )}
-                          </div>
+                          {(currentRoom.phase === 'playing' || currentRoom.phase === 'voting') && (
+                            <div className={`px-3 py-1.5 rounded-lg ${timeLeft <= 30 ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}>
+                              <span className="text-xl font-bold font-mono">{formatTime(timeLeft)}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
                       <div className="glass rounded-xl p-6 text-center">
                         <ArtDisplay artId={currentRoom.artId} size={300} />
-                        
                         {currentRoom.phase === 'waiting' && (
                           <div className="mt-4 p-3 bg-white/5 rounded-lg">
                             <div className="text-sm text-gray-400 mb-2">Players ({currentRoom.players?.length || 0}/{currentRoom.maxPlayers})</div>
@@ -774,20 +589,16 @@
                               ))}
                             </div>
                             {currentRoom.creator === wallet.address && currentRoom.players?.length >= CONFIG.MIN_PLAYERS && (
-                              <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">
-                                🚀 Start Game
-                              </button>
+                              <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">🚀 Start Game</button>
                             )}
                             {(currentRoom.players?.length || 0) < CONFIG.MIN_PLAYERS && (
                               <p className="text-sm text-yellow-500 mt-3">Need {CONFIG.MIN_PLAYERS - (currentRoom.players?.length || 0)} more player(s)</p>
                             )}
                           </div>
                         )}
-
                         {currentRoom.phase === 'playing' && canVoteEnd && (
                           <div className="mt-4 p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
-                            <button onClick={handleVoteEndGame}
-                              disabled={currentRoom.endGameVotes?.includes(wallet.address)}
+                            <button onClick={handleVoteEndGame} disabled={currentRoom.endGameVotes?.includes(wallet.address)}
                               className={`w-full py-2 rounded-lg font-medium ${currentRoom.endGameVotes?.includes(wallet.address) ? 'bg-white/10 text-gray-500' : 'btn-warning text-white'}`}>
                               {currentRoom.endGameVotes?.includes(wallet.address) ? `✓ Voted (${endVoteProgress})` : `Vote End (${endVoteProgress})`}
                             </button>
@@ -800,18 +611,14 @@
                           <div className="text-4xl mb-3">🏆</div>
                           <h3 className="text-xl font-bold mb-2">Game Over!</h3>
                           <p className="text-sm text-gray-400 mb-2">Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}</p>
-                          <p className="text-lg font-bold text-yellow-400">💰 Won: {formatGEN(currentRoom.winnerReward || 0)} GEN</p>
                           {currentRoom.winner === wallet.address && <p className="text-green-400 mt-2">🎉 You won!</p>}
                           <button onClick={handleLeaveRoom} className="mt-4 px-4 py-2 bg-white/10 rounded-lg">Back to Lobby</button>
                         </div>
                       )}
 
-                      {currentRoom.phase !== 'finished' && (
-                        <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>
-                      )}
+                      {currentRoom.phase !== 'finished' && <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>}
                     </div>
 
-                    {/* Right Column - Chat & Voting */}
                     <div className="space-y-4">
                       {currentRoom.phase === 'playing' && (
                         <div className="glass rounded-xl p-5">
@@ -831,12 +638,9 @@
                             <div ref={chatEndRef} />
                           </div>
                           <div className="flex gap-2">
-                            <input type="text" value={message} onChange={e => setMessage(e.target.value)} 
-                              onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
-                              placeholder="Describe the art..." 
-                              className="flex-1 px-4 py-2 rounded-lg bg-black/30 border border-white/10 text-gray-200 focus:outline-none focus:border-primary-500/50" />
-                            <button onClick={handleSendMessage} disabled={!message.trim()} 
-                              className={`px-4 py-2 rounded-lg font-medium ${message.trim() ? 'btn-success text-white' : 'bg-white/10 text-gray-500'}`}>Send</button>
+                            <input type="text" value={message} onChange={e => setMessage(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
+                              placeholder="Describe the art..." className="flex-1 px-4 py-2 rounded-lg bg-black/30 border border-white/10 text-gray-200 focus:outline-none focus:border-primary-500/50" />
+                            <button onClick={handleSendMessage} disabled={!message.trim()} className={`px-4 py-2 rounded-lg font-medium ${message.trim() ? 'btn-success text-white' : 'bg-white/10 text-gray-500'}`}>Send</button>
                           </div>
                         </div>
                       )}
@@ -850,15 +654,13 @@
                               const isVoted = currentRoom.votes?.[wallet.address] === addr;
                               const voteCount = Object.values(currentRoom.votes || {}).filter(v => v === addr).length;
                               return (
-                                <div key={addr} onClick={() => !currentRoom.votes?.[wallet.address] && handleVote(addr)} 
+                                <div key={addr} onClick={() => !currentRoom.votes?.[wallet.address] && handleVote(addr)}
                                   className={`p-4 rounded-lg transition ${isVoted ? 'bg-primary-500/20 border border-primary-500/40' : 'bg-white/5 border border-white/5'} ${!currentRoom.votes?.[wallet.address] ? 'cursor-pointer hover:bg-white/10' : ''}`}>
                                   <div className="flex justify-between items-center mb-2">
                                     <span className="text-sm font-medium">{globalState.playerIds[addr] || generatePlayerId(addr)}{addr === wallet.address ? ' (You)' : ''}</span>
                                     <span className="text-yellow-500 text-sm">🗳️ {voteCount}</span>
                                   </div>
-                                  <div className="space-y-1">
-                                    {authorMsgs.slice(0, 2).map((m, i) => <p key={i} className="text-sm text-gray-300 truncate">"{m.content}"</p>)}
-                                  </div>
+                                  <div className="space-y-1">{authorMsgs.slice(0, 2).map((m, i) => <p key={i} className="text-sm text-gray-300 truncate">"{m.content}"</p>)}</div>
                                   {isVoted && <div className="mt-2 text-sm text-primary-400">✓ Your vote</div>}
                                 </div>
                               );
@@ -871,16 +673,14 @@
                         <div className="glass rounded-xl p-5">
                           <h3 className="font-semibold mb-4">📊 Final Results</h3>
                           <div className="space-y-2">
-                            {[...new Set(currentRoom.messages?.map(m => m.author) || [])]
-                              .sort((a, b) => (currentRoom.voteCount?.[b] || 0) - (currentRoom.voteCount?.[a] || 0))
-                              .map(addr => (
-                                <div key={addr} className={`p-3 rounded-lg ${addr === currentRoom.winner ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
-                                  <div className="flex justify-between">
-                                    <span>{addr === currentRoom.winner && '🏆 '}{globalState.playerIds[addr] || generatePlayerId(addr)}</span>
-                                    <span className="text-yellow-500">{currentRoom.voteCount?.[addr] || 0} votes</span>
-                                  </div>
+                            {[...new Set(currentRoom.messages?.map(m => m.author) || [])].sort((a, b) => (currentRoom.voteCount?.[b] || 0) - (currentRoom.voteCount?.[a] || 0)).map(addr => (
+                              <div key={addr} className={`p-3 rounded-lg ${addr === currentRoom.winner ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
+                                <div className="flex justify-between">
+                                  <span>{addr === currentRoom.winner && '🏆 '}{globalState.playerIds[addr] || generatePlayerId(addr)}</span>
+                                  <span className="text-yellow-500">{currentRoom.voteCount?.[addr] || 0} votes</span>
                                 </div>
-                              ))}
+                              </div>
+                            ))}
                           </div>
                         </div>
                       )}
@@ -890,7 +690,6 @@
               </div>
             )}
 
-            {/* Leaderboard */}
             {activeTab === 'leaderboard' && (
               <div className="glass rounded-2xl p-6 animate-fade-in">
                 <h2 className="text-2xl font-bold text-center gradient-text-gold mb-6">🏆 Leaderboard</h2>
@@ -899,12 +698,10 @@
                 ) : (
                   <div className="space-y-2">
                     {sortedLeaderboard.map((p, idx) => (
-                      <div key={p.address} className={`grid grid-cols-[50px_1fr_70px_60px] items-center p-3 rounded-lg ${
-                        idx === 0 ? 'bg-yellow-500/10' : p.address === wallet.address ? 'bg-primary-500/10' : 'bg-white/3'
-                      }`}>
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${
-                          idx < 3 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-white/10'
-                        }`}>{idx < 3 ? ['🥇', '🥈', '🥉'][idx] : idx + 1}</div>
+                      <div key={p.address} className={`grid grid-cols-[50px_1fr_70px_60px] items-center p-3 rounded-lg ${idx === 0 ? 'bg-yellow-500/10' : p.address === wallet.address ? 'bg-primary-500/10' : 'bg-white/3'}`}>
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${idx < 3 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-white/10'}`}>
+                          {idx < 3 ? ['🥇', '🥈', '🥉'][idx] : idx + 1}
+                        </div>
                         <span className="text-sm font-medium truncate">{p.playerId}{p.address === wallet.address && ' (You)'}</span>
                         <div className="text-center"><div className="font-bold text-primary-300">{p.experience}</div><div className="text-[10px] text-gray-500">XP</div></div>
                         <div className="text-center"><div className="font-bold text-green-400">{p.wins}</div><div className="text-[10px] text-gray-500">Wins</div></div>
@@ -916,10 +713,8 @@
             )}
           </main>
 
-          {/* Footer */}
           <footer className="text-center py-6 border-t border-white/5 mt-8">
-            <p className="text-sm text-gray-500 mb-2">Consensus Gallery • <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a></p>
-            <div className="text-xs text-gray-600">Contract: <a href={CONTRACT.STUDIO_URL} target="_blank" className="font-mono text-primary-400/70 hover:text-primary-400">{shortenAddress(CONTRACT.ADDRESS)}</a></div>
+            <p className="text-sm text-gray-500">Consensus Gallery • <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a></p>
           </footer>
         </div>
       );
