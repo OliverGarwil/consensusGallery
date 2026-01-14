@@ -77,7 +77,7 @@
     const isAIPlayer = (address) => address && address.startsWith('0xAI');
 
     // 更新版本号，清除旧数据
-    const STORAGE_KEY = 'consensus_gallery_v9';
+    const STORAGE_KEY = 'consensus_gallery_v10';
 
     const ART_COLLECTION = [
       { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
@@ -336,6 +336,8 @@
         }
         
         setProcessing(true);
+        let newRoomId = null;
+        
         try {
           // 只有当 ENTRY_FEE > 0 时才需要等待交易
           if (CONFIG.ENTRY_FEE > 0) {
@@ -345,9 +347,9 @@
           
           // 交易成功或无需交易，创建房间
           const art = getRandomArt();
-          const roomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+          newRoomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
           const room = {
-            id: roomId, 
+            id: newRoomId, 
             gameNumber: globalState.totalGames + 1, 
             creator: wallet.address,
             phase: 'waiting', 
@@ -364,35 +366,50 @@
             startTime: null,
             voteDeadline: null, 
             locked: false,
-            aiFillScheduled: Date.now() + CONFIG.AI_FILL_DELAY * 1000, // 记录AI填充时间
           };
           
           setGlobalState(prev => ({ 
             ...prev, 
-            rooms: { ...prev.rooms, [roomId]: room }, 
+            rooms: { ...prev.rooms, [newRoomId]: room }, 
             totalGames: prev.totalGames + 1 
           }));
           
-          setCurrentRoomId(roomId);
+          setCurrentRoomId(newRoomId);
           setActiveTab('game');
           setSuccess('Room Created!');
           setTimeout(() => setSuccess(''), 3000);
           
-          // 10秒后检查并自动填充AI玩家
+        } catch (err) {
+          console.error('Create room error:', err);
+          if (err.code === 4001) {
+            setError('Transaction cancelled');
+          } else {
+            setError('Failed to create room: ' + (err.message || 'Unknown error'));
+          }
+          setTimeout(() => setError(''), 4000);
+          setProcessing(false);
+          return;
+        }
+        
+        setProcessing(false);
+        
+        // 10秒后检查并自动填充AI玩家（在try外部执行，避免影响房间创建）
+        if (newRoomId) {
           setTimeout(() => {
             setGlobalState(prev => {
-              const currentRoom = prev.rooms[roomId];
+              const currentRoom = prev.rooms[newRoomId];
               // 检查房间是否存在、是否还在等待状态、是否只有创建者一人
               if (!currentRoom || currentRoom.phase !== 'waiting' || currentRoom.players.length > 1) {
                 return prev;
               }
               // 添加4个AI玩家
               const aiAddresses = AI_PLAYERS.map(ai => ai.address);
+              console.log('Adding AI players to room:', newRoomId);
               return {
                 ...prev,
                 rooms: {
                   ...prev.rooms,
-                  [roomId]: {
+                  [newRoomId]: {
                     ...currentRoom,
                     players: [...currentRoom.players, ...aiAddresses],
                   }
@@ -400,17 +417,7 @@
               };
             });
           }, CONFIG.AI_FILL_DELAY * 1000);
-          
-        } catch (err) {
-          console.error('Create room error:', err);
-          if (err.code === 4001) {
-            setError('Transaction cancelled');
-          } else {
-            setError('Failed to create room');
-          }
-          setTimeout(() => setError(''), 4000);
         }
-        setProcessing(false);
       };
 
       // 加入房间
