@@ -44,9 +44,6 @@
 
     const CONTRACT = {
       ADDRESS: '0x5c2F525BA54839338F9BC9Cd8DF7B656FBc5E7d0',
-      NETWORK: 'GenLayer Asimov Testnet',
-      CHAIN_ID: '0x' + (10242).toString(16), // Asimov Testnet Chain ID
-      RPC_URL: 'https://rpc.asimov.genlayer.com',
       STUDIO_URL: 'https://studio.genlayer.com',
     };
 
@@ -63,7 +60,7 @@
       PARTICIPANT_EXP: 10,
     };
 
-    const STORAGE_KEY = 'consensus_gallery_v4';
+    const STORAGE_KEY = 'consensus_gallery_v5';
 
     const ART_COLLECTION = [
       { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
@@ -190,40 +187,9 @@
         if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }, [currentRoom?.messages?.length]);
 
-      // Switch to Asimov Testnet
-      const switchToAsimov = async () => {
-        try {
-          await window.ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: CONTRACT.CHAIN_ID }],
-          });
-          return true;
-        } catch (switchError) {
-          if (switchError.code === 4902) {
-            try {
-              await window.ethereum.request({
-                method: 'wallet_addEthereumChain',
-                params: [{
-                  chainId: CONTRACT.CHAIN_ID,
-                  chainName: CONTRACT.NETWORK,
-                  rpcUrls: [CONTRACT.RPC_URL],
-                  nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
-                }],
-              });
-              return true;
-            } catch (addError) {
-              console.error('Failed to add network:', addError);
-              return false;
-            }
-          }
-          console.error('Failed to switch network:', switchError);
-          return false;
-        }
-      };
-
       const connectWallet = async () => {
         if (typeof window.ethereum === 'undefined') {
-          setError('Please install MetaMask to play!');
+          setError('Please install MetaMask!');
           setTimeout(() => setError(''), 4000);
           return;
         }
@@ -233,10 +199,6 @@
           const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
           if (accounts && accounts.length > 0) {
             const addr = accounts[0];
-            
-            // Switch to Asimov Testnet
-            await switchToAsimov();
-            
             setWallet({ connected: true, address: addr });
             getPlayerId(addr);
             setSuccess('Wallet Connected!');
@@ -268,10 +230,6 @@
 
       const sendTransaction = async (toAddress, amountInEth) => {
         if (!window.ethereum) throw new Error('MetaMask not found');
-        
-        // Ensure on correct network
-        await switchToAsimov();
-        
         const amountWei = '0x' + Math.floor(amountInEth * 1e18).toString(16);
         const txHash = await window.ethereum.request({
           method: 'eth_sendTransaction',
@@ -279,7 +237,6 @@
             from: wallet.address,
             to: toAddress,
             value: amountWei,
-            gas: '0x5208',
           }],
         });
         return txHash;
