@@ -53,31 +53,63 @@
     const CONFIG = {
       MAX_PLAYERS: 5,
       MIN_PLAYERS: 2,
-      ENTRY_FEE: 0,  // 设为0，无需支付GEN币
+      ENTRY_FEE: 0.001,  // 0.001 GEN币入场费
       WINNER_REWARD_PERCENT: 80,
-      MIN_GAME_DURATION: 60,
-      MAX_GAME_DURATION: 10 * 60,
+      MIN_GAME_DURATION: 30,  // 最少30秒后可投票结束
+      MAX_GAME_DURATION: 3 * 60,  // 游戏时间3分钟
       VOTE_DURATION: 30,
       WINNER_EXP: 100,
       CORRECT_VOTER_EXP: 30,
       PARTICIPANT_EXP: 10,
       ROOM_EXPIRE_HOURS: 2, // 房间过期时间（小时）
-      AI_FILL_DELAY: 30, // 10秒后自动填充AI玩家
+      AI_FILL_DELAY: 10, // 10秒后自动填充AI玩家
     };
 
-    // AI玩家配置
+    // AI玩家配置（含预设描述）
     const AI_PLAYERS = [
-      { address: '0xAI00000000000000000000000000000000000001', name: 'ArtBot_Alpha' },
-      { address: '0xAI00000000000000000000000000000000000002', name: 'ArtBot_Beta' },
-      { address: '0xAI00000000000000000000000000000000000003', name: 'ArtBot_Gamma' },
-      { address: '0xAI00000000000000000000000000000000000004', name: 'ArtBot_Delta' },
+      { 
+        address: '0xAI00000000000000000000000000000000000001', 
+        name: 'ArtBot_Alpha',
+        descriptions: [
+          'This artwork captures a moment of profound beauty and emotion.',
+          'The colors blend harmoniously creating a mesmerizing visual experience.',
+          'I see deep symbolism in every brushstroke of this masterpiece.',
+        ]
+      },
+      { 
+        address: '0xAI00000000000000000000000000000000000002', 
+        name: 'ArtBot_Beta',
+        descriptions: [
+          'The composition draws the eye naturally across the canvas.',
+          'Light and shadow play together in perfect balance here.',
+          'This piece speaks to the human condition in subtle ways.',
+        ]
+      },
+      { 
+        address: '0xAI00000000000000000000000000000000000003', 
+        name: 'ArtBot_Gamma',
+        descriptions: [
+          'A stunning display of artistic technique and vision.',
+          'The mood conveyed here is both haunting and beautiful.',
+          'Every element serves a purpose in this carefully crafted work.',
+        ]
+      },
+      { 
+        address: '0xAI00000000000000000000000000000000000004', 
+        name: 'ArtBot_Delta',
+        descriptions: [
+          'The artist masterfully captures the essence of the subject.',
+          'There is a timeless quality to this remarkable piece.',
+          'I am moved by the emotional depth expressed here.',
+        ]
+      },
     ];
 
     // 检查是否是AI玩家
     const isAIPlayer = (address) => address && address.startsWith('0xAI');
 
     // 更新版本号，清除旧数据
-    const STORAGE_KEY = 'consensus_gallery_v10';
+    const STORAGE_KEY = 'consensus_gallery_v11';
 
     const ART_COLLECTION = [
       { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
@@ -492,6 +524,8 @@
       const handleStartGame = (roomId) => {
         const room = globalState.rooms[roomId];
         if (!room || room.phase !== 'waiting' || room.players.length < CONFIG.MIN_PLAYERS) return;
+        
+        // 开始游戏
         setGlobalState(prev => ({ 
           ...prev, 
           rooms: { 
@@ -504,6 +538,42 @@
             } 
           } 
         }));
+        
+        // 让AI玩家自动发送描述（延迟随机时间）
+        const aiPlayersInRoom = room.players.filter(addr => isAIPlayer(addr));
+        aiPlayersInRoom.forEach((aiAddr, index) => {
+          const aiPlayer = AI_PLAYERS.find(ai => ai.address === aiAddr);
+          if (!aiPlayer) return;
+          
+          // 每个AI在不同时间发送消息（5-30秒之间随机）
+          const delay = 5000 + Math.random() * 25000 + index * 3000;
+          setTimeout(() => {
+            setGlobalState(prev => {
+              const currentRoom = prev.rooms[roomId];
+              if (!currentRoom || currentRoom.phase !== 'playing') return prev;
+              
+              // 随机选择一条描述
+              const description = aiPlayer.descriptions[Math.floor(Math.random() * aiPlayer.descriptions.length)];
+              const newMessage = {
+                id: Date.now() + index,
+                author: aiAddr,
+                content: description,
+                timestamp: Date.now()
+              };
+              
+              return {
+                ...prev,
+                rooms: {
+                  ...prev.rooms,
+                  [roomId]: {
+                    ...currentRoom,
+                    messages: [...currentRoom.messages, newMessage]
+                  }
+                }
+              };
+            });
+          }, delay);
+        });
       };
 
       // 发送消息
@@ -755,9 +825,10 @@
                   <>
                     {/* 创建游戏 */}
                     <div className="glass rounded-2xl p-6">
-                      <h3 className="text-lg font-semibold mb-4">🎮 Create New Game</h3>
+                      <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
+                      <p className="text-sm text-gray-400 mb-4">Entry fee: {CONFIG.ENTRY_FEE} GEN • Game time: {CONFIG.MAX_GAME_DURATION / 60} min</p>
                       <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
-                        {processing ? <><Spinner /> Creating...</> : '✨ Create Room'}
+                        {processing ? <><Spinner /> Processing...</> : `✨ Create Room (${CONFIG.ENTRY_FEE} GEN)`}
                       </button>
                     </div>
 
@@ -781,7 +852,7 @@
                                 </div>
                               </div>
                               <button onClick={() => handleJoinRoom(room.id)} disabled={processing} className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">
-                                {processing ? <Spinner /> : 'Join'}
+                                {processing ? <Spinner /> : `Join (${CONFIG.ENTRY_FEE} GEN)`}
                               </button>
                             </div>
                           ))}
