@@ -62,6 +62,7 @@
       PARTICIPANT_EXP: 10,
       ROOM_IDLE_TIMEOUT: 60,
       AI_FILL_DELAY: 10,
+      SYNC_INTERVAL: 1000,
     };
 
     const AI_PLAYERS = [
@@ -76,7 +77,7 @@
     ];
 
     const isAIPlayer = (address) => address && address.startsWith('0xAI');
-    const STORAGE_KEY = 'consensus_gallery_data_v1';
+    const STORAGE_KEY = 'consensus_gallery_data_v2';
 
     const ART_COLLECTION = [
       { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/800px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg', fallback: 'https://www.moma.org/media/W1siZiIsIjQ2NzUxNyJdLFsicCIsImNvbnZlcnQiLCItcXVhbGl0eSA5MCAtcmVzaXplIDUxMng1MTJcdTAwM2UiXV0.jpg' },
@@ -119,6 +120,62 @@
       return { ...state, rooms: cleanedRooms };
     };
 
+    // Merge room states for sync - keep the most up-to-date version
+    const mergeRoomStates = (localState, remoteState) => {
+      const mergedRooms = { ...localState.rooms };
+      
+      Object.entries(remoteState.rooms || {}).forEach(([id, remoteRoom]) => {
+        const localRoom = mergedRooms[id];
+        
+        if (!localRoom) {
+          // New room from remote
+          mergedRooms[id] = remoteRoom;
+        } else {
+          // Merge: prefer room with more players or later phase
+          const phaseOrder = { waiting: 0, playing: 1, voting: 2, finished: 3 };
+          const localPhase = phaseOrder[localRoom.phase] || 0;
+          const remotePhase = phaseOrder[remoteRoom.phase] || 0;
+          
+          if (remotePhase > localPhase) {
+            // Remote is more advanced
+            mergedRooms[id] = remoteRoom;
+          } else if (remotePhase === localPhase) {
+            // Same phase - merge players and messages
+            const mergedPlayers = [...new Set([...localRoom.players, ...remoteRoom.players])];
+            const mergedMessages = [...localRoom.messages];
+            remoteRoom.messages.forEach(rm => {
+              if (!mergedMessages.find(lm => lm.id === rm.id)) {
+                mergedMessages.push(rm);
+              }
+            });
+            mergedMessages.sort((a, b) => a.timestamp - b.timestamp);
+            
+            const mergedVotes = { ...localRoom.votes, ...remoteRoom.votes };
+            const mergedEndVotes = [...new Set([...(localRoom.endGameVotes || []), ...(remoteRoom.endGameVotes || [])])];
+            
+            mergedRooms[id] = {
+              ...localRoom,
+              ...remoteRoom,
+              players: mergedPlayers,
+              messages: mergedMessages,
+              votes: mergedVotes,
+              endGameVotes: mergedEndVotes,
+              pool: Math.max(localRoom.pool || 0, remoteRoom.pool || 0),
+            };
+          }
+        }
+      });
+      
+      return {
+        ...localState,
+        rooms: mergedRooms,
+        leaderboard: { ...localState.leaderboard, ...remoteState.leaderboard },
+        gameHistory: [...new Set([...(localState.gameHistory || []), ...(remoteState.gameHistory || [])])].slice(-100),
+        totalGames: Math.max(localState.totalGames || 0, remoteState.totalGames || 0),
+        playerIds: { ...localState.playerIds, ...remoteState.playerIds },
+      };
+    };
+
     const phaseLabels = { waiting: 'Waiting', playing: 'Playing', voting: 'Voting', finished: 'Finished' };
     const phaseColors = { waiting: '#6B7280', playing: '#10B981', voting: '#F59E0B', finished: '#8B5CF6' };
     const Spinner = () => <div className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>;
@@ -144,6 +201,58 @@
       );
     };
 
+    // Game Rules Component
+    const GameRules = ({ showRules, setShowRules }) => {
+      if (!showRules) return null;
+      return (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowRules(false)}>
+          <div className="glass rounded-2xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto animate-fade-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold gradient-text">📜 Game Rules</h3>
+              <button onClick={() => setShowRules(false)} className="text-gray-400 hover:text-white text-xl">✕</button>
+            </div>
+            <div className="space-y-4 text-sm text-gray-300">
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">🎮 How to Play</h4>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>Connect your MetaMask wallet</li>
+                  <li>Create a new room or join an existing one</li>
+                  <li>Wait for other players (or AI bots join after 10s)</li>
+                  <li>Host starts the game when ready (min 2 players)</li>
+                </ol>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">🎨 Gameplay</h4>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>View the artwork displayed</li>
+                  <li>Write creative descriptions of the art ({CONFIG.MAX_GAME_DURATION / 60} minutes)</li>
+                  <li>After time ends, vote for the best description</li>
+                  <li>Most voted player wins!</li>
+                </ol>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">⭐ XP Rewards</h4>
+                <ul className="space-y-1">
+                  <li>🏆 <span className="text-yellow-400">Win the game:</span> +{CONFIG.WINNER_EXP} XP</li>
+                  <li>✓ <span className="text-green-400">Vote for winner:</span> +{CONFIG.CORRECT_VOTER_EXP} XP</li>
+                  <li>👤 <span className="text-blue-400">Participate:</span> +{CONFIG.PARTICIPANT_EXP} XP</li>
+                </ul>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">⚠️ Important</h4>
+                <ul className="space-y-1">
+                  <li>• Room closes if empty for 60 seconds</li>
+                  <li>• Cannot join after game starts</li>
+                  <li>• AI players auto-join if no one joins</li>
+                  <li>• Vote time: {CONFIG.VOTE_DURATION} seconds</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
     function App() {
       const [wallet, setWallet] = useState({ connected: false, address: '' });
       const [globalState, setGlobalState] = useState(() => {
@@ -158,6 +267,7 @@
       const [processing, setProcessing] = useState(false);
       const [timeLeft, setTimeLeft] = useState(0);
       const [lastFinishedGameId, setLastFinishedGameId] = useState(null);
+      const [showRules, setShowRules] = useState(false);
       
       const globalStateRef = useRef(globalState);
       globalStateRef.current = globalState;
@@ -174,25 +284,43 @@
         return newId;
       }, [globalState.playerIds]);
 
+      // Save to localStorage
       useEffect(() => { setStorage(globalState); }, [globalState]);
       
+      // Cross-tab/cross-browser sync with merge
       useEffect(() => {
         const handleStorage = (e) => {
           if (e.key === STORAGE_KEY && e.newValue) {
-            try { setGlobalState(cleanupRooms({ ...createInitialState(), ...JSON.parse(e.newValue) })); } catch {}
+            try { 
+              const remoteState = JSON.parse(e.newValue);
+              setGlobalState(prev => cleanupRooms(mergeRoomStates(prev, remoteState)));
+            } catch {}
           }
         };
         window.addEventListener('storage', handleStorage);
+        
+        // Faster sync interval for real-time updates
         const syncInterval = setInterval(() => {
           const stored = getStorage();
           if (stored) {
-            const cleaned = cleanupRooms({ ...createInitialState(), ...stored });
-            if (JSON.stringify(globalStateRef.current) !== JSON.stringify(cleaned)) setGlobalState(cleaned);
+            setGlobalState(prev => {
+              const merged = cleanupRooms(mergeRoomStates(prev, stored));
+              // Only update if different
+              if (JSON.stringify(prev) !== JSON.stringify(merged)) {
+                return merged;
+              }
+              return prev;
+            });
           }
-        }, 2000);
-        return () => { window.removeEventListener('storage', handleStorage); clearInterval(syncInterval); };
+        }, CONFIG.SYNC_INTERVAL);
+        
+        return () => { 
+          window.removeEventListener('storage', handleStorage); 
+          clearInterval(syncInterval); 
+        };
       }, []);
 
+      // Game timer
       useEffect(() => {
         const timer = setInterval(() => {
           const roomId = currentRoomIdRef.current;
@@ -272,16 +400,24 @@
 
       const handleJoinRoom = async (roomId) => {
         if (!wallet.connected) { setError('Please connect wallet first'); setTimeout(() => setError(''), 4000); return; }
-        const room = globalState.rooms[roomId];
-        if (!room || room.phase !== 'waiting' || room.locked) { setError('Room unavailable'); setTimeout(() => setError(''), 3000); return; }
+        
+        // Re-check room state from storage for latest data
+        const latestState = getStorage();
+        const room = latestState?.rooms?.[roomId] || globalState.rooms[roomId];
+        
+        if (!room) { setError('Room not found'); setTimeout(() => setError(''), 3000); return; }
+        if (room.phase !== 'waiting') { setError('Game already started - cannot join'); setTimeout(() => setError(''), 3000); return; }
+        if (room.locked) { setError('Room is locked'); setTimeout(() => setError(''), 3000); return; }
         if (room.players.length >= room.maxPlayers) { setError('Room is full'); setTimeout(() => setError(''), 3000); return; }
         if (room.players.includes(wallet.address)) { setCurrentRoomId(roomId); setActiveTab('game'); return; }
+        
         setProcessing(true);
         try {
           await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
           setGlobalState(prev => {
             const r = prev.rooms[roomId];
-            if (!r) return prev;
+            if (!r || r.phase !== 'waiting' || r.locked) return prev;
+            if (r.players.includes(wallet.address)) return prev;
             return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...r, players: [...r.players, wallet.address], pool: (r.pool || 0) + CONFIG.ENTRY_FEE } } };
           });
           setCurrentRoomId(roomId);
@@ -295,7 +431,22 @@
       const handleStartGame = (roomId) => {
         const room = globalState.rooms[roomId];
         if (!room || room.phase !== 'waiting' || room.players.length < CONFIG.MIN_PLAYERS) return;
-        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [roomId]: { ...prev.rooms[roomId], phase: 'playing', locked: true, startTime: Date.now() } } }));
+        
+        // Lock room and start game
+        setGlobalState(prev => ({ 
+          ...prev, 
+          rooms: { 
+            ...prev.rooms, 
+            [roomId]: { 
+              ...prev.rooms[roomId], 
+              phase: 'playing', 
+              locked: true, 
+              startTime: Date.now() 
+            } 
+          } 
+        }));
+        
+        // AI players send messages
         room.players.filter(isAIPlayer).forEach((aiAddr, idx) => {
           const ai = AI_PLAYERS.find(a => a.address === aiAddr);
           if (!ai) return;
@@ -411,7 +562,12 @@
 
       const availableRooms = useMemo(() => {
         const now = Date.now();
-        return Object.values(globalState.rooms).filter(r => r.phase === 'waiting' && !r.locked && r.players.length < r.maxPlayers && !(r.players.length === 1 && (now - r.createdAt) > CONFIG.ROOM_IDLE_TIMEOUT * 1000));
+        return Object.values(globalState.rooms).filter(r => 
+          r.phase === 'waiting' && 
+          !r.locked && 
+          r.players.length < r.maxPlayers && 
+          !(r.players.length === 1 && (now - r.createdAt) > CONFIG.ROOM_IDLE_TIMEOUT * 1000)
+        );
       }, [globalState.rooms]);
       
       const myRooms = useMemo(() => Object.values(globalState.rooms).filter(r => wallet.connected && r.players.includes(wallet.address) && r.phase !== 'finished'), [globalState.rooms, wallet]);
@@ -426,18 +582,21 @@
 
       return (
         <div className="min-h-screen text-gray-200">
+          <GameRules showRules={showRules} setShowRules={setShowRules} />
+          
           <header className="flex justify-between items-center px-4 md:px-6 py-4 border-b border-white/10">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl btn-primary">🎨</div>
               <h1 className="text-lg md:text-xl font-bold gradient-text">Consensus Gallery</h1>
             </div>
             <div className="flex items-center gap-2">
+              <button onClick={() => setShowRules(true)} className="px-3 py-2 glass rounded-lg text-sm hover:bg-white/10 transition">📜 Rules</button>
               {wallet.connected ? (
                 <div className="flex items-center gap-2 px-3 py-2 glass rounded-xl">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                   <span className="text-xs md:text-sm font-medium">{myPlayerId}</span>
                   <span className="px-2 py-0.5 bg-primary-500/30 rounded text-xs font-bold text-primary-300">{myStats.experience || 0} XP</span>
-                  <span className="px-2 py-0.5 bg-yellow-500/30 rounded text-xs font-bold text-yellow-300">{(myStats.totalRewards || 0).toFixed(4)} GEN</span>
+                  <span className="text-xs text-gray-400 font-mono">{shortenAddress(wallet.address)}</span>
                 </div>
               ) : (
                 <button onClick={connectWallet} disabled={processing} className="btn-primary px-4 py-2 rounded-xl text-white text-sm font-semibold flex items-center gap-2">
@@ -464,7 +623,18 @@
               <div className="space-y-6 animate-fade-in">
                 <div className="text-center py-6">
                   <h2 className="text-2xl md:text-3xl font-bold gradient-text mb-2">Consensus Gallery</h2>
-                  <p className="text-gray-400">Win: +{CONFIG.WINNER_EXP} XP | Correct Vote: +{CONFIG.CORRECT_VOTER_EXP} XP | Participate: +{CONFIG.PARTICIPANT_EXP} XP</p>
+                  <p className="text-gray-400 mb-2">Art Description Game on GenLayer</p>
+                  <button onClick={() => setShowRules(true)} className="text-sm text-primary-400 hover:underline">📜 View Game Rules</button>
+                </div>
+                
+                {/* Quick Rules */}
+                <div className="glass rounded-2xl p-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center text-xs">
+                    <div className="p-2 bg-white/5 rounded-lg"><div className="text-lg mb-1">🏆</div><div className="text-yellow-400 font-bold">+{CONFIG.WINNER_EXP} XP</div><div className="text-gray-500">Win Game</div></div>
+                    <div className="p-2 bg-white/5 rounded-lg"><div className="text-lg mb-1">✓</div><div className="text-green-400 font-bold">+{CONFIG.CORRECT_VOTER_EXP} XP</div><div className="text-gray-500">Correct Vote</div></div>
+                    <div className="p-2 bg-white/5 rounded-lg"><div className="text-lg mb-1">⏱️</div><div className="text-blue-400 font-bold">{CONFIG.MAX_GAME_DURATION / 60} min</div><div className="text-gray-500">Game Time</div></div>
+                    <div className="p-2 bg-white/5 rounded-lg"><div className="text-lg mb-1">👥</div><div className="text-purple-400 font-bold">{CONFIG.MIN_PLAYERS}-{CONFIG.MAX_PLAYERS}</div><div className="text-gray-500">Players</div></div>
+                  </div>
                 </div>
                 
                 {!wallet.connected ? (
@@ -479,7 +649,7 @@
                     <div className="glass rounded-2xl p-6">
                       <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
                       <p className="text-sm text-gray-400 mb-4">Entry: {CONFIG.ENTRY_FEE} GEN | Game: {CONFIG.MAX_GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
-                      <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">{processing ? <><Spinner /> Processing...</> : `✨ Create Room (${CONFIG.ENTRY_FEE} GEN)`}</button>
+                      <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">{processing ? <><Spinner /> Processing...</> : `✨ Create Room`}</button>
                     </div>
 
                     <div className="glass rounded-2xl p-6">
@@ -493,9 +663,12 @@
                                 <div>
                                   <div className="font-medium">{room.artName}</div>
                                   <div className="text-sm text-gray-400">👥 {room.players?.length || 0}/{room.maxPlayers} | Host: {globalState.playerIds[room.creator] || generatePlayerId(room.creator)}</div>
+                                  <div className="text-xs text-gray-500">Status: {room.locked ? '🔒 Locked' : '🟢 Open'}</div>
                                 </div>
                               </div>
-                              <button onClick={() => handleJoinRoom(room.id)} disabled={processing} className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">{processing ? <Spinner /> : 'Join'}</button>
+                              <button onClick={() => handleJoinRoom(room.id)} disabled={processing || room.locked} className={`px-4 py-2 rounded-lg text-white text-sm font-medium ${room.locked ? 'bg-gray-500 cursor-not-allowed' : 'btn-success'}`}>
+                                {processing ? <Spinner /> : room.locked ? 'Locked' : 'Join'}
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -538,6 +711,7 @@
                       <div className="glass rounded-xl p-4">
                         <div className="flex items-center justify-between">
                           <span className="px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2" style={{ background: phaseColors[currentRoom.phase] + '20', color: phaseColors[currentRoom.phase] }}><span className="w-2 h-2 rounded-full pulse-dot" style={{ background: phaseColors[currentRoom.phase] }}></span>{phaseLabels[currentRoom.phase]}</span>
+                          {currentRoom.locked && <span className="text-xs text-yellow-500">🔒 Room Locked</span>}
                           {(currentRoom.phase === 'playing' || currentRoom.phase === 'voting') && <div className={`px-3 py-1.5 rounded-lg ${timeLeft <= 30 ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}><span className="text-xl font-bold font-mono">{formatTime(timeLeft)}</span></div>}
                         </div>
                       </div>
@@ -552,7 +726,7 @@
                                 <span key={addr} className={`px-2 py-1 rounded text-xs ${addr === wallet.address ? 'bg-primary-500/30 text-primary-300' : isAIPlayer(addr) ? 'bg-yellow-500/20 text-yellow-300' : 'bg-white/10'}`}>{isAIPlayer(addr) && '🤖 '}{globalState.playerIds[addr] || generatePlayerId(addr)}{addr === currentRoom.creator && ' 👑'}</span>
                               ))}
                             </div>
-                            {currentRoom.creator === wallet.address && currentRoom.players?.length >= CONFIG.MIN_PLAYERS && <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">🚀 Start Game</button>}
+                            {currentRoom.creator === wallet.address && currentRoom.players?.length >= CONFIG.MIN_PLAYERS && <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">🚀 Start Game (locks room)</button>}
                             {currentRoom.players?.length < CONFIG.MIN_PLAYERS && <p className="text-sm text-yellow-500 mt-3">Waiting for players... (AI joins in {CONFIG.AI_FILL_DELAY}s)</p>}
                           </div>
                         )}
@@ -671,7 +845,7 @@
 
             {activeTab === 'leaderboard' && (
               <div className="glass rounded-2xl p-6 animate-fade-in">
-                <h2 className="text-2xl font-bold text-center gradient-text-gold mb-6">🏆 Rankings (by Rewards)</h2>
+                <h2 className="text-2xl font-bold text-center gradient-text-gold mb-6">🏆 Rankings</h2>
                 {sortedLeaderboard.length === 0 ? <div className="text-center py-10 text-gray-500">No players yet</div> : (
                   <div className="space-y-2">
                     {sortedLeaderboard.map((p, idx) => (
