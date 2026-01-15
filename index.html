@@ -372,14 +372,46 @@
       };
 
       const handleCreateRoom = async () => {
-        if (!wallet.connected) { setError('Please connect wallet first'); setTimeout(() => setError(''), 4000); return; }
-        setProcessing(true);
+        // Auto-connect wallet if not connected
+        if (!wallet.connected) {
+          if (typeof window.ethereum === 'undefined') { 
+            setError('Please install MetaMask!'); 
+            setTimeout(() => setError(''), 4000); 
+            return; 
+          }
+          setProcessing(true);
+          try {
+            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            if (accounts && accounts.length > 0) {
+              setWallet({ connected: true, address: accounts[0] });
+              getPlayerId(accounts[0]);
+              // Continue with room creation after wallet connected
+            } else {
+              setError('Failed to connect wallet');
+              setTimeout(() => setError(''), 4000);
+              setProcessing(false);
+              return;
+            }
+          } catch (err) {
+            setError('Wallet connection cancelled');
+            setTimeout(() => setError(''), 4000);
+            setProcessing(false);
+            return;
+          }
+        } else {
+          setProcessing(true);
+        }
+        
         let newRoomId = null;
         try {
+          // Get current wallet address (may have just connected)
+          const currentAddress = wallet.address || (await window.ethereum.request({ method: 'eth_accounts' }))[0];
+          if (!currentAddress) { setError('No wallet address'); setProcessing(false); return; }
+          
           await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
           const art = getRandomArt();
           newRoomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-          const room = { id: newRoomId, gameNumber: globalState.totalGames + 1, creator: wallet.address, phase: 'waiting', artId: art.id, artName: art.name, maxPlayers: CONFIG.MAX_PLAYERS, players: [wallet.address], pool: CONFIG.ENTRY_FEE, messages: [], votes: {}, endGameVotes: [], winner: null, createdAt: Date.now(), startTime: null, voteDeadline: null, locked: false };
+          const room = { id: newRoomId, gameNumber: globalState.totalGames + 1, creator: currentAddress, phase: 'waiting', artId: art.id, artName: art.name, maxPlayers: CONFIG.MAX_PLAYERS, players: [currentAddress], pool: CONFIG.ENTRY_FEE, messages: [], votes: {}, endGameVotes: [], winner: null, createdAt: Date.now(), startTime: null, voteDeadline: null, locked: false };
           setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [newRoomId]: room }, totalGames: prev.totalGames + 1 }));
           setCurrentRoomId(newRoomId);
           setActiveTab('game');
@@ -399,26 +431,56 @@
       };
 
       const handleJoinRoom = async (roomId) => {
-        if (!wallet.connected) { setError('Please connect wallet first'); setTimeout(() => setError(''), 4000); return; }
+        // Auto-connect wallet if not connected
+        if (!wallet.connected) {
+          if (typeof window.ethereum === 'undefined') { 
+            setError('Please install MetaMask!'); 
+            setTimeout(() => setError(''), 4000); 
+            return; 
+          }
+          setProcessing(true);
+          try {
+            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            if (accounts && accounts.length > 0) {
+              setWallet({ connected: true, address: accounts[0] });
+              getPlayerId(accounts[0]);
+            } else {
+              setError('Failed to connect wallet');
+              setTimeout(() => setError(''), 4000);
+              setProcessing(false);
+              return;
+            }
+          } catch (err) {
+            setError('Wallet connection cancelled');
+            setTimeout(() => setError(''), 4000);
+            setProcessing(false);
+            return;
+          }
+        } else {
+          setProcessing(true);
+        }
+        
+        // Get current wallet address
+        const currentAddress = wallet.address || (await window.ethereum.request({ method: 'eth_accounts' }))[0];
+        if (!currentAddress) { setError('No wallet address'); setProcessing(false); return; }
         
         // Re-check room state from storage for latest data
         const latestState = getStorage();
         const room = latestState?.rooms?.[roomId] || globalState.rooms[roomId];
         
-        if (!room) { setError('Room not found'); setTimeout(() => setError(''), 3000); return; }
-        if (room.phase !== 'waiting') { setError('Game already started - cannot join'); setTimeout(() => setError(''), 3000); return; }
-        if (room.locked) { setError('Room is locked'); setTimeout(() => setError(''), 3000); return; }
-        if (room.players.length >= room.maxPlayers) { setError('Room is full'); setTimeout(() => setError(''), 3000); return; }
-        if (room.players.includes(wallet.address)) { setCurrentRoomId(roomId); setActiveTab('game'); return; }
+        if (!room) { setError('Room not found'); setTimeout(() => setError(''), 3000); setProcessing(false); return; }
+        if (room.phase !== 'waiting') { setError('Game already started - cannot join'); setTimeout(() => setError(''), 3000); setProcessing(false); return; }
+        if (room.locked) { setError('Room is locked'); setTimeout(() => setError(''), 3000); setProcessing(false); return; }
+        if (room.players.length >= room.maxPlayers) { setError('Room is full'); setTimeout(() => setError(''), 3000); setProcessing(false); return; }
+        if (room.players.includes(currentAddress)) { setCurrentRoomId(roomId); setActiveTab('game'); setProcessing(false); return; }
         
-        setProcessing(true);
         try {
           await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
           setGlobalState(prev => {
             const r = prev.rooms[roomId];
             if (!r || r.phase !== 'waiting' || r.locked) return prev;
-            if (r.players.includes(wallet.address)) return prev;
-            return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...r, players: [...r.players, wallet.address], pool: (r.pool || 0) + CONFIG.ENTRY_FEE } } };
+            if (r.players.includes(currentAddress)) return prev;
+            return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...r, players: [...r.players, currentAddress], pool: (r.pool || 0) + CONFIG.ENTRY_FEE } } };
           });
           setCurrentRoomId(roomId);
           setActiveTab('game');
@@ -553,7 +615,7 @@
         const gameRecord = { id: roomId, gameNumber: room.gameNumber, artId: room.artId, artName: room.artName, players: room.players.filter(p => !isAIPlayer(p)), winner: winnerAddress, winnerReward, voteCount, votes, finishedAt: Date.now() };
         const gameHistory = [...(prevState.gameHistory || []), gameRecord].slice(-100);
         
-        setTimeout(() => { setLastFinishedGameId(roomId); setActiveTab('history'); setCurrentRoomId(null); }, 2000);
+        // Stay on game page to show results - no redirect
         
         return { ...prevState, leaderboard: newLeaderboard, gameHistory, rooms: { ...prevState.rooms, [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount, winnerReward } } };
       };
@@ -637,61 +699,55 @@
                   </div>
                 </div>
                 
-                {!wallet.connected ? (
-                  <div className="glass rounded-2xl p-8 text-center">
-                    <div className="text-5xl mb-4">🦊</div>
-                    <h3 className="text-xl font-bold mb-2">Connect MetaMask</h3>
-                    <p className="text-gray-400 mb-6">Connect your wallet to start playing</p>
-                    <button onClick={connectWallet} disabled={processing} className="btn-primary px-8 py-3 rounded-xl text-white font-semibold text-lg">{processing ? <><Spinner /> Connecting...</> : 'Connect Wallet'}</button>
+                {/* Create Game - always visible */}
+                <div className="glass rounded-2xl p-6">
+                  <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
+                  <p className="text-sm text-gray-400 mb-4">Entry: {CONFIG.ENTRY_FEE} GEN | Game: {CONFIG.MAX_GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
+                  <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
+                    {processing ? <><Spinner /> Processing...</> : wallet.connected ? '✨ Create Room' : '🦊 Connect & Create Room'}
+                  </button>
+                </div>
+
+                {/* Available Rooms - always visible */}
+                <div className="glass rounded-2xl p-6">
+                  <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({availableRooms.length})</h3>
+                  {availableRooms.length === 0 ? <div className="text-center py-8 text-gray-500">No rooms available. Create one!</div> : (
+                    <div className="space-y-3">
+                      {availableRooms.map(room => (
+                        <div key={room.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl hover:bg-white/10 transition">
+                          <div className="flex items-center gap-4">
+                            <ArtDisplay artId={room.artId} size={60} />
+                            <div>
+                              <div className="font-medium">{room.artName}</div>
+                              <div className="text-sm text-gray-400">👥 {room.players?.length || 0}/{room.maxPlayers} | Host: {globalState.playerIds[room.creator] || generatePlayerId(room.creator)}</div>
+                              <div className="text-xs text-gray-500">Status: {room.locked ? '🔒 Locked' : '🟢 Open'}</div>
+                            </div>
+                          </div>
+                          <button onClick={() => handleJoinRoom(room.id)} disabled={processing || room.locked} className={`px-4 py-2 rounded-lg text-white text-sm font-medium ${room.locked ? 'bg-gray-500 cursor-not-allowed' : 'btn-success'}`}>
+                            {processing ? <Spinner /> : room.locked ? 'Locked' : wallet.connected ? 'Join' : 'Connect & Join'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* My Games - only when connected */}
+                {wallet.connected && myRooms.length > 0 && (
+                  <div className="glass rounded-2xl p-6 border-primary-500/30">
+                    <h3 className="text-lg font-semibold mb-4 text-primary-300">⏳ My Games</h3>
+                    <div className="space-y-3">
+                      {myRooms.map(room => (
+                        <div key={room.id} className="flex items-center justify-between p-4 bg-primary-500/10 rounded-xl">
+                          <div className="flex items-center gap-4">
+                            <ArtDisplay artId={room.artId} size={50} />
+                            <div><div className="font-medium text-sm">{room.artName}</div><div className="text-xs text-gray-400">{phaseLabels[room.phase]} | 👥 {room.players?.length || 0}</div></div>
+                          </div>
+                          <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }} className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">Enter</button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ) : (
-                  <>
-                    <div className="glass rounded-2xl p-6">
-                      <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
-                      <p className="text-sm text-gray-400 mb-4">Entry: {CONFIG.ENTRY_FEE} GEN | Game: {CONFIG.MAX_GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
-                      <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">{processing ? <><Spinner /> Processing...</> : `✨ Create Room`}</button>
-                    </div>
-
-                    <div className="glass rounded-2xl p-6">
-                      <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({availableRooms.length})</h3>
-                      {availableRooms.length === 0 ? <div className="text-center py-8 text-gray-500">No rooms available. Create one!</div> : (
-                        <div className="space-y-3">
-                          {availableRooms.map(room => (
-                            <div key={room.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl hover:bg-white/10 transition">
-                              <div className="flex items-center gap-4">
-                                <ArtDisplay artId={room.artId} size={60} />
-                                <div>
-                                  <div className="font-medium">{room.artName}</div>
-                                  <div className="text-sm text-gray-400">👥 {room.players?.length || 0}/{room.maxPlayers} | Host: {globalState.playerIds[room.creator] || generatePlayerId(room.creator)}</div>
-                                  <div className="text-xs text-gray-500">Status: {room.locked ? '🔒 Locked' : '🟢 Open'}</div>
-                                </div>
-                              </div>
-                              <button onClick={() => handleJoinRoom(room.id)} disabled={processing || room.locked} className={`px-4 py-2 rounded-lg text-white text-sm font-medium ${room.locked ? 'bg-gray-500 cursor-not-allowed' : 'btn-success'}`}>
-                                {processing ? <Spinner /> : room.locked ? 'Locked' : 'Join'}
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {myRooms.length > 0 && (
-                      <div className="glass rounded-2xl p-6 border-primary-500/30">
-                        <h3 className="text-lg font-semibold mb-4 text-primary-300">⏳ My Games</h3>
-                        <div className="space-y-3">
-                          {myRooms.map(room => (
-                            <div key={room.id} className="flex items-center justify-between p-4 bg-primary-500/10 rounded-xl">
-                              <div className="flex items-center gap-4">
-                                <ArtDisplay artId={room.artId} size={50} />
-                                <div><div className="font-medium text-sm">{room.artName}</div><div className="text-xs text-gray-400">{phaseLabels[room.phase]} | 👥 {room.players?.length || 0}</div></div>
-                              </div>
-                              <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }} className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">Enter</button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
                 )}
 
                 <div className="grid grid-cols-2 gap-4">
@@ -741,9 +797,11 @@
                         <div className="rounded-xl p-6 text-center" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.2))', border: '1px solid rgba(139,92,246,0.3)' }}>
                           <div className="text-4xl mb-3">🏆</div>
                           <h3 className="text-xl font-bold mb-2">Game Over!</h3>
-                          <p className="text-sm text-gray-400 mb-2">Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}</p>
+                          <p className="text-sm text-gray-400 mb-2">Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}{isAIPlayer(currentRoom.winner) && ' 🤖'}</p>
                           {currentRoom.winner === wallet.address && <p className="text-green-400 mt-2">🎉 You won! +{CONFIG.WINNER_EXP} XP</p>}
-                          <p className="text-xs text-gray-500 mt-2">Redirecting to history...</p>
+                          {currentRoom.winner !== wallet.address && currentRoom.votes?.[wallet.address] === currentRoom.winner && <p className="text-green-400 mt-2">✓ Correct vote! +{CONFIG.CORRECT_VOTER_EXP} XP</p>}
+                          {currentRoom.winner !== wallet.address && currentRoom.votes?.[wallet.address] && currentRoom.votes?.[wallet.address] !== currentRoom.winner && <p className="text-gray-400 mt-2">Participated +{CONFIG.PARTICIPANT_EXP} XP</p>}
+                          <button onClick={handleLeaveRoom} className="btn-primary mt-4 px-6 py-2 rounded-lg text-white font-semibold">Back to Lobby</button>
                         </div>
                       )}
                       {currentRoom.phase !== 'finished' && <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>}
