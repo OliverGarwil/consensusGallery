@@ -53,19 +53,19 @@
     const CONFIG = {
       MAX_PLAYERS: 5,
       MIN_PLAYERS: 2,
-      ENTRY_FEE: 0,  // GEN币入场费
+      ENTRY_FEE: 0,
       WINNER_REWARD_PERCENT: 80,
-      MIN_GAME_DURATION: 30,  // 最少30秒后可投票结束
-      MAX_GAME_DURATION: 3 * 60,  // 游戏时间3分钟
+      MIN_GAME_DURATION: 30,
+      MAX_GAME_DURATION: 3 * 60,
       VOTE_DURATION: 30,
       WINNER_EXP: 100,
       CORRECT_VOTER_EXP: 30,
       PARTICIPANT_EXP: 10,
-      ROOM_EXPIRE_HOURS: 2, // 房间过期时间（小时）
-      AI_FILL_DELAY: 10, // 10秒后自动填充AI玩家
+      ROOM_IDLE_TIMEOUT: 60,
+      AI_FILL_DELAY: 10,
     };
 
-    // AI玩家配置（含预设描述）
+    // AI player configurations with preset descriptions
     const AI_PLAYERS = [
       { 
         address: '0xAI00000000000000000000000000000000000001', 
@@ -105,32 +105,53 @@
       },
     ];
 
-    // 检查是否是AI玩家
+    // Check if address is AI player
     const isAIPlayer = (address) => address && address.startsWith('0xAI');
 
-    // 更新版本号，清除旧数据
-    const STORAGE_KEY = 'consensus_gallery_v11';
+    // Storage key - update version to clear old data
+    const STORAGE_KEY = 'consensus_gallery_v12';
 
+    // Art collection with multiple image sources for fallback
     const ART_COLLECTION = [
-      { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
-      { id: 2, name: 'Persistence of Memory', artist: 'Dali', year: 1931, url: 'https://upload.wikimedia.org/wikipedia/en/d/dd/The_Persistence_of_Memory.jpg' },
-      { id: 3, name: 'The Great Wave', artist: 'Hokusai', year: 1831, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Tsunami_by_hokusai_19th_century.jpg/1280px-Tsunami_by_hokusai_19th_century.jpg' },
-      { id: 4, name: 'Girl with Pearl Earring', artist: 'Vermeer', year: 1665, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/1665_Girl_with_a_Pearl_Earring.jpg/800px-1665_Girl_with_a_Pearl_Earring.jpg' },
-      { id: 5, name: 'The Scream', artist: 'Munch', year: 1893, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg/800px-Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg' },
-      { id: 6, name: 'Birth of Venus', artist: 'Botticelli', year: 1485, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg/1280px-Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg' },
-      { id: 7, name: 'American Gothic', artist: 'Wood', year: 1930, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg/800px-Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg' },
-      { id: 8, name: 'The Kiss', artist: 'Klimt', year: 1908, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg/800px-The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg' },
-      { id: 9, name: 'Cafe Terrace', artist: 'Van Gogh', year: 1888, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Van_Gogh_-_Terrasse_des_Caf%C3%A9s_an_der_Place_du_Forum_in_Arles_am_Abend1.jpeg/800px-Van_Gogh_-_Terrasse_des_Caf%C3%A9s_an_der_Place_du_Forum_in_Arles_am_Abend1.jpeg' },
-      { id: 10, name: 'Water Lilies', artist: 'Monet', year: 1906, url: 'https://upload.wikimedia.org/wikipedia/commons/a/aa/Claude_Monet_-_Water_Lilies_-_1906%2C_Ryerson.jpg' },
-      { id: 11, name: 'Whistlers Mother', artist: 'Whistler', year: 1871, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Whistlers_Mother_high_res.jpg/1280px-Whistlers_Mother_high_res.jpg' },
-      { id: 12, name: 'La Grande Jatte', artist: 'Seurat', year: 1886, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/A_Sunday_on_La_Grande_Jatte%2C_Georges_Seurat%2C_1884.jpg/1280px-A_Sunday_on_La_Grande_Jatte%2C_Georges_Seurat%2C_1884.jpg' },
+      { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, 
+        url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/800px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg',
+        fallback: 'https://www.moma.org/media/W1siZiIsIjQ2NzUxNyJdLFsicCIsImNvbnZlcnQiLCItcXVhbGl0eSA5MCAtcmVzaXplIDUxMng1MTJcdTAwM2UiXV0.jpg'
+      },
+      { id: 2, name: 'Persistence of Memory', artist: 'Dali', year: 1931, 
+        url: 'https://uploads4.wikiart.org/images/salvador-dali/the-persistence-of-memory-1931.jpg',
+        fallback: 'https://www.dalipaintings.com/images/paintings/the-persistence-of-memory.jpg'
+      },
+      { id: 3, name: 'The Great Wave', artist: 'Hokusai', year: 1831, 
+        url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Tsunami_by_hokusai_19th_century.jpg/800px-Tsunami_by_hokusai_19th_century.jpg',
+        fallback: 'https://upload.wikimedia.org/wikipedia/commons/0/0a/The_Great_Wave_off_Kanagawa.jpg'
+      },
+      { id: 4, name: 'Girl with Pearl Earring', artist: 'Vermeer', year: 1665, 
+        url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/1665_Girl_with_a_Pearl_Earring.jpg/800px-1665_Girl_with_a_Pearl_Earring.jpg',
+        fallback: 'https://upload.wikimedia.org/wikipedia/commons/d/d7/Meisje_met_de_parel.jpg'
+      },
+      { id: 5, name: 'The Scream', artist: 'Munch', year: 1893, 
+        url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg/800px-Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg',
+        fallback: 'https://upload.wikimedia.org/wikipedia/commons/f/f4/The_Scream.jpg'
+      },
+      { id: 6, name: 'Birth of Venus', artist: 'Botticelli', year: 1485, 
+        url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg/800px-Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg',
+        fallback: 'https://www.uffizi.it/immagini/opere/botticelli-venere/botticelli-nascita-venere.jpg'
+      },
+      { id: 7, name: 'American Gothic', artist: 'Wood', year: 1930, 
+        url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg/800px-Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg',
+        fallback: 'https://www.artic.edu/iiif/2/b272df73-a965-ac37-4172-be4e99483637/full/843,/0/default.jpg'
+      },
+      { id: 8, name: 'The Kiss', artist: 'Klimt', year: 1908, 
+        url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg/800px-The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg',
+        fallback: 'https://upload.wikimedia.org/wikipedia/commons/f/f3/Gustav_Klimt_016.jpg'
+      },
     ];
 
     const ADJECTIVES = ['Swift', 'Brave', 'Wise', 'Noble', 'Silent', 'Golden', 'Silver', 'Cosmic', 'Mystic', 'Ancient'];
     const NOUNS = ['Phoenix', 'Dragon', 'Tiger', 'Eagle', 'Wolf', 'Hawk', 'Lion', 'Bear', 'Serpent', 'Falcon'];
 
     const generatePlayerId = (address) => {
-      // 检查是否是AI玩家
+      // Check if AI player
       const aiPlayer = AI_PLAYERS.find(ai => ai.address === address);
       if (aiPlayer) return aiPlayer.name;
       
@@ -140,7 +161,6 @@
 
     const shortenAddress = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '';
     const formatTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
-    const formatGEN = (amount) => amount.toFixed(4);
     const getArt = (id) => ART_COLLECTION.find(a => a.id === id) || ART_COLLECTION[0];
     const getRandomArt = () => ART_COLLECTION[Math.floor(Math.random() * ART_COLLECTION.length)];
 
@@ -158,29 +178,34 @@
       } catch {} 
     };
     
-    const createInitialState = () => ({ rooms: {}, leaderboard: {}, totalGames: 0, playerIds: {} });
+    const createInitialState = () => ({ 
+      rooms: {}, 
+      leaderboard: {}, 
+      totalGames: 0, 
+      playerIds: {},
+      gameHistory: []
+    });
 
-    // 清理过期和已完成的房间
+    // Clean up expired and finished rooms
     const cleanupRooms = (state) => {
       const now = Date.now();
-      const expireMs = CONFIG.ROOM_EXPIRE_HOURS * 60 * 60 * 1000;
+      const idleTimeoutMs = CONFIG.ROOM_IDLE_TIMEOUT * 1000;
       const cleanedRooms = {};
       
       Object.entries(state.rooms || {}).forEach(([id, room]) => {
         const age = now - room.createdAt;
-        const isExpired = age > expireMs;
         
-        // 保留：未过期的等待中房间、进行中的游戏、投票中的游戏
-        // 删除：过期的房间、已完成的房间
+        // Remove finished rooms
         if (room.phase === 'finished') {
-          // 已完成的房间不保留
           return;
         }
-        if (room.phase === 'waiting' && isExpired) {
-          // 等待中但已过期的房间不保留
+        
+        // Remove waiting rooms that are idle for too long (only 1 player for 60s)
+        if (room.phase === 'waiting' && room.players.length === 1 && age > idleTimeoutMs) {
           return;
         }
-        // 保留其他房间
+        
+        // Keep other rooms
         cleanedRooms[id] = room;
       });
       
@@ -192,14 +217,35 @@
 
     const Spinner = () => <div className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>;
 
+    // Art display component with fallback support
     const ArtDisplay = ({ artId, size = 280 }) => {
       const art = getArt(artId);
       const [loaded, setLoaded] = useState(false);
+      const [error, setError] = useState(false);
+      const [imgSrc, setImgSrc] = useState(art.url);
+      
+      const handleError = () => {
+        if (!error && art.fallback) {
+          setError(true);
+          setImgSrc(art.fallback);
+        }
+      };
+      
       return (
         <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
-          {!loaded && <div className="absolute inset-0 flex items-center justify-center bg-white/5 rounded-xl"><Spinner /></div>}
-          <img src={art.url} alt={art.name} onLoad={() => setLoaded(true)}
-            className={`w-full h-full object-cover rounded-xl shadow-xl transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`} />
+          {!loaded && (
+            <div className="absolute inset-0 flex items-center justify-center bg-white/5 rounded-xl">
+              <Spinner />
+            </div>
+          )}
+          <img 
+            src={imgSrc} 
+            alt={art.name} 
+            onLoad={() => setLoaded(true)}
+            onError={handleError}
+            crossOrigin="anonymous"
+            className={`w-full h-full object-cover rounded-xl shadow-xl transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`} 
+          />
           {size > 80 && (
             <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent rounded-b-xl">
               <div className="text-sm font-medium text-white truncate">{art.name}</div>
@@ -240,10 +286,10 @@
         return newId;
       }, [globalState.playerIds]);
 
-      // 保存状态到localStorage
+      // Save state to localStorage
       useEffect(() => { setStorage(globalState); }, [globalState]);
       
-      // 跨标签页同步 + 定期清理
+      // Cross-tab sync and periodic cleanup
       useEffect(() => {
         const handleStorage = (e) => {
           if (e.key === STORAGE_KEY && e.newValue) {
@@ -270,13 +316,16 @@
         };
       }, []);
 
-      // 游戏计时器
+      // Game timer
       useEffect(() => {
         const timer = setInterval(() => {
           const roomId = currentRoomIdRef.current;
           if (!roomId) return;
           const room = globalStateRef.current.rooms[roomId];
-          if (!room || room.phase === 'finished' || room.phase === 'waiting') { setTimeLeft(0); return; }
+          if (!room || room.phase === 'finished' || room.phase === 'waiting') { 
+            setTimeLeft(0); 
+            return; 
+          }
           const now = Date.now();
           const elapsed = Math.floor((now - room.startTime) / 1000);
           const remaining = room.phase === 'voting' 
@@ -289,12 +338,12 @@
         return () => clearInterval(timer);
       }, []);
 
-      // 自动滚动聊天
+      // Auto scroll chat
       useEffect(() => {
         if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }, [currentRoom?.messages?.length]);
 
-      // 连接钱包
+      // Connect wallet
       const connectWallet = async () => {
         if (typeof window.ethereum === 'undefined') {
           setError('Please install MetaMask!');
@@ -320,7 +369,7 @@
         setProcessing(false);
       };
 
-      // 监听账户变化
+      // Listen for account changes
       useEffect(() => {
         if (typeof window.ethereum !== 'undefined') {
           const handleAccountsChanged = async (accounts) => {
@@ -337,14 +386,8 @@
         }
       }, []);
 
-      // 发送交易（仅当需要时）
+      // Send transaction - ALWAYS call wallet even for 0 GEN
       const sendTransaction = async (toAddress, amountInEth) => {
-        // 如果金额为0或负数，跳过交易
-        if (amountInEth <= 0) {
-          console.log('Entry fee is 0, skipping transaction');
-          return 'no-transaction-needed';
-        }
-        
         if (!window.ethereum) throw new Error('MetaMask not found');
         
         const amountWei = '0x' + Math.floor(amountInEth * 1e18).toString(16);
@@ -359,7 +402,7 @@
         return txHash;
       };
 
-      // 创建房间
+      // Create room
       const handleCreateRoom = async () => {
         if (!wallet.connected) { 
           setError('Please connect wallet first'); 
@@ -371,13 +414,11 @@
         let newRoomId = null;
         
         try {
-          // 只有当 ENTRY_FEE > 0 时才需要等待交易
-          if (CONFIG.ENTRY_FEE > 0) {
-            const txResult = await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
-            console.log('Transaction result:', txResult);
-          }
+          // Always call wallet for payment confirmation
+          const txResult = await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
+          console.log('Transaction result:', txResult);
           
-          // 交易成功或无需交易，创建房间
+          // Transaction successful, create room
           const art = getRandomArt();
           newRoomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
           const room = {
@@ -425,16 +466,14 @@
         
         setProcessing(false);
         
-        // 10秒后检查并自动填充AI玩家（在try外部执行，避免影响房间创建）
+        // Add AI players after delay if no one joins
         if (newRoomId) {
           setTimeout(() => {
             setGlobalState(prev => {
               const currentRoom = prev.rooms[newRoomId];
-              // 检查房间是否存在、是否还在等待状态、是否只有创建者一人
               if (!currentRoom || currentRoom.phase !== 'waiting' || currentRoom.players.length > 1) {
                 return prev;
               }
-              // 添加4个AI玩家
               const aiAddresses = AI_PLAYERS.map(ai => ai.address);
               console.log('Adding AI players to room:', newRoomId);
               return {
@@ -452,7 +491,7 @@
         }
       };
 
-      // 加入房间
+      // Join room
       const handleJoinRoom = async (roomId) => {
         if (!wallet.connected) { 
           setError('Please connect wallet first'); 
@@ -472,7 +511,7 @@
           return; 
         }
         
-        // 如果已经在房间中，直接进入
+        // If already in room, just enter
         if (room.players.includes(wallet.address)) { 
           setCurrentRoomId(roomId); 
           setActiveTab('game'); 
@@ -481,13 +520,11 @@
         
         setProcessing(true);
         try {
-          // 只有当 ENTRY_FEE > 0 时才需要等待交易
-          if (CONFIG.ENTRY_FEE > 0) {
-            const txResult = await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
-            console.log('Transaction result:', txResult);
-          }
+          // Always call wallet for payment confirmation
+          const txResult = await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
+          console.log('Transaction result:', txResult);
           
-          // 交易成功或无需交易，加入房间
+          // Transaction successful, join room
           setGlobalState(prev => {
             const r = prev.rooms[roomId];
             if (!r) return prev;
@@ -520,12 +557,12 @@
         setProcessing(false);
       };
 
-      // 开始游戏
+      // Start game
       const handleStartGame = (roomId) => {
         const room = globalState.rooms[roomId];
         if (!room || room.phase !== 'waiting' || room.players.length < CONFIG.MIN_PLAYERS) return;
         
-        // 开始游戏
+        // Start game
         setGlobalState(prev => ({ 
           ...prev, 
           rooms: { 
@@ -539,20 +576,19 @@
           } 
         }));
         
-        // 让AI玩家自动发送描述（延迟随机时间）
+        // AI players auto send descriptions
         const aiPlayersInRoom = room.players.filter(addr => isAIPlayer(addr));
         aiPlayersInRoom.forEach((aiAddr, index) => {
           const aiPlayer = AI_PLAYERS.find(ai => ai.address === aiAddr);
           if (!aiPlayer) return;
           
-          // 每个AI在不同时间发送消息（5-30秒之间随机）
+          // Each AI sends message at random time (5-30s)
           const delay = 5000 + Math.random() * 25000 + index * 3000;
           setTimeout(() => {
             setGlobalState(prev => {
               const currentRoom = prev.rooms[roomId];
               if (!currentRoom || currentRoom.phase !== 'playing') return prev;
               
-              // 随机选择一条描述
               const description = aiPlayer.descriptions[Math.floor(Math.random() * aiPlayer.descriptions.length)];
               const newMessage = {
                 id: Date.now() + index,
@@ -576,7 +612,7 @@
         });
       };
 
-      // 发送消息
+      // Send message
       const handleSendMessage = () => {
         if (!wallet.connected || !currentRoomId || !message.trim()) return;
         const room = globalState.rooms[currentRoomId];
@@ -600,7 +636,7 @@
         setMessage('');
       };
 
-      // 投票结束游戏
+      // Vote to end game
       const handleVoteEndGame = () => {
         if (!wallet.connected || !currentRoomId) return;
         const room = globalState.rooms[currentRoomId];
@@ -622,7 +658,7 @@
         }));
       };
 
-      // 开始投票阶段
+      // Start voting phase
       const handleStartVoting = (roomId) => {
         setGlobalState(prev => {
           const room = prev.rooms[roomId];
@@ -641,7 +677,7 @@
         });
       };
 
-      // 投票
+      // Vote for player
       const handleVote = (targetAddress) => {
         if (!wallet.connected || !currentRoomId) return;
         const room = globalState.rooms[currentRoomId];
@@ -665,7 +701,7 @@
         }
       };
 
-      // 结束游戏
+      // Finalize game
       const handleFinalizeGame = (roomId) => {
         setGlobalState(prev => {
           const room = prev.rooms[roomId];
@@ -674,7 +710,7 @@
         });
       };
 
-      // 计算最终结果
+      // Calculate final results and save to history
       const finalizeGameState = (prevState, roomId, votes) => {
         const room = prevState.rooms[roomId];
         if (!room || room.phase === 'finished') return prevState;
@@ -695,11 +731,13 @@
         const pool = room.pool || (room.players.length * CONFIG.ENTRY_FEE);
         const winnerReward = pool * (CONFIG.WINNER_REWARD_PERCENT / 100);
         const newLeaderboard = JSON.parse(JSON.stringify(prevState.leaderboard));
+        
         if (!newLeaderboard[winnerAddress]) {
           newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0 };
         }
         newLeaderboard[winnerAddress].experience += CONFIG.WINNER_EXP;
         newLeaderboard[winnerAddress].wins += 1;
+        
         Object.entries(votes).forEach(([voter, target]) => {
           if (!newLeaderboard[voter]) {
             newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0 };
@@ -707,9 +745,26 @@
           newLeaderboard[voter].experience += target === winnerAddress ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP;
           newLeaderboard[voter].participations += 1;
         });
+        
+        // Save game to history
+        const gameRecord = {
+          id: roomId,
+          gameNumber: room.gameNumber,
+          artId: room.artId,
+          artName: room.artName,
+          players: room.players,
+          winner: winnerAddress,
+          winnerReward: winnerReward,
+          voteCount: voteCount,
+          finishedAt: Date.now(),
+        };
+        
+        const gameHistory = [...(prevState.gameHistory || []), gameRecord].slice(-50);
+        
         return { 
           ...prevState, 
           leaderboard: newLeaderboard, 
+          gameHistory: gameHistory,
           rooms: { 
             ...prevState.rooms, 
             [roomId]: { 
@@ -724,22 +779,26 @@
         };
       };
 
-      // 离开房间
+      // Leave room
       const handleLeaveRoom = () => { 
         setCurrentRoomId(null); 
         setActiveTab('lobby'); 
         setMessage(''); 
       };
 
-      // 可加入的房间（其他玩家创建的等待中房间）
-      const availableRooms = useMemo(() => 
-        Object.values(globalState.rooms).filter(r => 
-          r.phase === 'waiting' && 
-          !r.locked && 
-          r.players.length < r.maxPlayers
-        ), [globalState.rooms]);
+      // Available rooms (not including rooms with only creator for more than 60s)
+      const availableRooms = useMemo(() => {
+        const now = Date.now();
+        return Object.values(globalState.rooms).filter(r => {
+          if (r.phase !== 'waiting' || r.locked) return false;
+          if (r.players.length >= r.maxPlayers) return false;
+          // Hide rooms that are idle for too long with only creator
+          if (r.players.length === 1 && (now - r.createdAt) > CONFIG.ROOM_IDLE_TIMEOUT * 1000) return false;
+          return true;
+        });
+      }, [globalState.rooms]);
       
-      // 我的房间
+      // My rooms
       const myRooms = useMemo(() => 
         Object.values(globalState.rooms).filter(r => 
           wallet.connected && 
@@ -747,7 +806,16 @@
           r.phase !== 'finished'
         ), [globalState.rooms, wallet]);
       
-      // 排行榜
+      // My game history
+      const myGameHistory = useMemo(() => {
+        if (!wallet.connected) return [];
+        return (globalState.gameHistory || [])
+          .filter(g => g.players.includes(wallet.address))
+          .reverse()
+          .slice(0, 20);
+      }, [globalState.gameHistory, wallet]);
+      
+      // Leaderboard
       const sortedLeaderboard = useMemo(() => 
         Object.entries(globalState.leaderboard)
           .map(([address, stats]) => ({ 
@@ -795,6 +863,7 @@
             {[
               { id: 'lobby', icon: '🏠', label: 'Lobby' }, 
               { id: 'game', icon: '🎮', label: 'Game', badge: myRooms.length > 0 ? myRooms.length : null }, 
+              { id: 'history', icon: '📜', label: 'History' },
               { id: 'leaderboard', icon: '🏆', label: 'Leaderboard' }
             ].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap ${activeTab === tab.id ? 'bg-primary-500/20 border border-primary-500/50 text-primary-300' : 'text-gray-400 hover:bg-white/5'}`}>
@@ -823,16 +892,16 @@
                   </div>
                 ) : (
                   <>
-                    {/* 创建游戏 */}
+                    {/* Create game */}
                     <div className="glass rounded-2xl p-6">
                       <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
-                      <p className="text-sm text-gray-400 mb-4">Entry fee: {CONFIG.ENTRY_FEE} GEN • Game time: {CONFIG.MAX_GAME_DURATION / 60} min</p>
+                      <p className="text-sm text-gray-400 mb-4">Entry fee: {CONFIG.ENTRY_FEE} GEN | Game time: {CONFIG.MAX_GAME_DURATION / 60} min</p>
                       <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
                         {processing ? <><Spinner /> Processing...</> : `✨ Create Room (${CONFIG.ENTRY_FEE} GEN)`}
                       </button>
                     </div>
 
-                    {/* 可加入的房间列表 */}
+                    {/* Available rooms */}
                     <div className="glass rounded-2xl p-6">
                       <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({availableRooms.length})</h3>
                       {availableRooms.length === 0 ? (
@@ -846,7 +915,7 @@
                                 <div>
                                   <div className="font-medium">{room.artName}</div>
                                   <div className="text-sm text-gray-400">
-                                    👥 {room.players?.length || 0}/{room.maxPlayers} • 
+                                    👥 {room.players?.length || 0}/{room.maxPlayers} | 
                                     Host: {globalState.playerIds[room.creator] || generatePlayerId(room.creator)}
                                   </div>
                                 </div>
@@ -860,7 +929,7 @@
                       )}
                     </div>
 
-                    {/* 我的游戏 */}
+                    {/* My games */}
                     {myRooms.length > 0 && (
                       <div className="glass rounded-2xl p-6 border-primary-500/30">
                         <h3 className="text-lg font-semibold mb-4 text-primary-300">⏳ My Games</h3>
@@ -872,7 +941,7 @@
                                 <div>
                                   <div className="font-medium text-sm">{room.artName}</div>
                                   <div className="text-xs text-gray-400">
-                                    {phaseLabels[room.phase]} • 👥 {room.players?.length || 0}/{room.maxPlayers}
+                                    {phaseLabels[room.phase]} | 👥 {room.players?.length || 0}/{room.maxPlayers}
                                   </div>
                                 </div>
                               </div>
@@ -975,7 +1044,7 @@
                           <div className="text-4xl mb-3">🏆</div>
                           <h3 className="text-xl font-bold mb-2">Game Over!</h3>
                           <p className="text-sm text-gray-400 mb-2">Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}</p>
-                          {currentRoom.winner === wallet.address && <p className="text-green-400 mt-2">🎉 You won!</p>}
+                          {currentRoom.winner === wallet.address && <p className="text-green-400 mt-2">🎉 You won! +{CONFIG.WINNER_EXP} XP</p>}
                           <button onClick={handleLeaveRoom} className="mt-4 px-4 py-2 bg-white/10 rounded-lg">Back to Lobby</button>
                         </div>
                       )}
@@ -991,9 +1060,12 @@
                             {currentRoom.messages?.length === 0 ? (
                               <div className="text-center py-8 text-gray-500 text-sm">Start describing!</div>
                             ) : currentRoom.messages?.map(msg => (
-                              <div key={msg.id} className={`p-3 rounded-lg ${msg.author === wallet.address ? 'bg-primary-500/20 ml-8' : 'bg-white/5 mr-8'}`}>
+                              <div key={msg.id} className={`p-3 rounded-lg ${msg.author === wallet.address ? 'bg-primary-500/20 ml-8' : isAIPlayer(msg.author) ? 'bg-yellow-500/10 mr-8' : 'bg-white/5 mr-8'}`}>
                                 <div className="flex justify-between items-start mb-1">
-                                  <span className="text-xs font-medium text-gray-400">{globalState.playerIds[msg.author] || generatePlayerId(msg.author)}</span>
+                                  <span className="text-xs font-medium text-gray-400">
+                                    {isAIPlayer(msg.author) && '🤖 '}
+                                    {globalState.playerIds[msg.author] || generatePlayerId(msg.author)}
+                                  </span>
                                   <span className="text-xs text-gray-500">{new Date(msg.timestamp).toLocaleTimeString()}</span>
                                 </div>
                                 <p className="text-gray-200">{msg.content}</p>
@@ -1021,7 +1093,11 @@
                                 <div key={addr} onClick={() => !currentRoom.votes?.[wallet.address] && handleVote(addr)}
                                   className={`p-4 rounded-lg transition ${isVoted ? 'bg-primary-500/20 border border-primary-500/40' : 'bg-white/5 border border-white/5'} ${!currentRoom.votes?.[wallet.address] ? 'cursor-pointer hover:bg-white/10' : ''}`}>
                                   <div className="flex justify-between items-center mb-2">
-                                    <span className="text-sm font-medium">{globalState.playerIds[addr] || generatePlayerId(addr)}{addr === wallet.address ? ' (You)' : ''}</span>
+                                    <span className="text-sm font-medium">
+                                      {isAIPlayer(addr) && '🤖 '}
+                                      {globalState.playerIds[addr] || generatePlayerId(addr)}
+                                      {addr === wallet.address ? ' (You)' : ''}
+                                    </span>
                                     <span className="text-yellow-500 text-sm">🗳️ {voteCount}</span>
                                   </div>
                                   <div className="space-y-1">{authorMsgs.slice(0, 2).map((m, i) => <p key={i} className="text-sm text-gray-300 truncate">"{m.content}"</p>)}</div>
@@ -1040,7 +1116,11 @@
                             {[...new Set(currentRoom.messages?.map(m => m.author) || [])].sort((a, b) => (currentRoom.voteCount?.[b] || 0) - (currentRoom.voteCount?.[a] || 0)).map(addr => (
                               <div key={addr} className={`p-3 rounded-lg ${addr === currentRoom.winner ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
                                 <div className="flex justify-between">
-                                  <span>{addr === currentRoom.winner && '🏆 '}{globalState.playerIds[addr] || generatePlayerId(addr)}</span>
+                                  <span>
+                                    {addr === currentRoom.winner && '🏆 '}
+                                    {isAIPlayer(addr) && '🤖 '}
+                                    {globalState.playerIds[addr] || generatePlayerId(addr)}
+                                  </span>
                                   <span className="text-yellow-500">{currentRoom.voteCount?.[addr] || 0} votes</span>
                                 </div>
                               </div>
@@ -1049,6 +1129,49 @@
                         </div>
                       )}
                     </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'history' && (
+              <div className="glass rounded-2xl p-6 animate-fade-in">
+                <h2 className="text-2xl font-bold text-center gradient-text mb-6">📜 Game History</h2>
+                {!wallet.connected ? (
+                  <div className="text-center py-10 text-gray-500">Connect wallet to view your game history</div>
+                ) : myGameHistory.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500">No games played yet</div>
+                ) : (
+                  <div className="space-y-3">
+                    {myGameHistory.map((game, idx) => {
+                      const isWinner = game.winner === wallet.address;
+                      const myVotes = game.voteCount?.[wallet.address] || 0;
+                      const xpEarned = isWinner ? CONFIG.WINNER_EXP : (myVotes > 0 ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP);
+                      
+                      return (
+                        <div key={game.id} className={`p-4 rounded-xl ${isWinner ? 'bg-yellow-500/10 border border-yellow-500/20' : 'bg-white/5'}`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <ArtDisplay artId={game.artId} size={50} />
+                              <div>
+                                <div className="font-medium text-sm">{game.artName}</div>
+                                <div className="text-xs text-gray-400">
+                                  Game #{game.gameNumber} | {new Date(game.finishedAt).toLocaleDateString()}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              {isWinner ? (
+                                <div className="text-yellow-400 font-bold">🏆 Winner</div>
+                              ) : (
+                                <div className="text-gray-400 text-sm">Participant</div>
+                              )}
+                              <div className="text-sm text-primary-300">+{xpEarned} XP</div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1078,7 +1201,7 @@
           </main>
 
           <footer className="text-center py-6 border-t border-white/5 mt-8">
-            <p className="text-sm text-gray-500">Consensus Gallery • <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a></p>
+            <p className="text-sm text-gray-500">Consensus Gallery | <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a></p>
           </footer>
         </div>
       );
