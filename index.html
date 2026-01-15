@@ -62,8 +62,11 @@
       PARTICIPANT_EXP: 10,
       ROOM_IDLE_TIMEOUT: 60,
       AI_FILL_DELAY: 10,
-      SYNC_INTERVAL: 1000,
+      SYNC_INTERVAL: 500,  // Faster sync for better multi-tab experience
     };
+    
+    // BroadcastChannel for instant cross-tab sync
+    const broadcastChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('consensus_gallery_sync') : null;
 
     const AI_PLAYERS = [
       { address: '0xAI00000000000000000000000000000000000001', name: 'ArtBot_Alpha',
@@ -284,11 +287,30 @@
         return newId;
       }, [globalState.playerIds]);
 
-      // Save to localStorage
-      useEffect(() => { setStorage(globalState); }, [globalState]);
+      // Save to localStorage and broadcast to other tabs
+      useEffect(() => { 
+        setStorage(globalState);
+        // Broadcast to other tabs for instant sync
+        if (broadcastChannel) {
+          try {
+            broadcastChannel.postMessage({ type: 'state_update', state: globalState });
+          } catch (e) {}
+        }
+      }, [globalState]);
       
-      // Cross-tab/cross-browser sync with merge
+      // Cross-tab sync with BroadcastChannel and localStorage
       useEffect(() => {
+        // Listen for BroadcastChannel messages (instant)
+        const handleBroadcast = (e) => {
+          if (e.data && e.data.type === 'state_update' && e.data.state) {
+            setGlobalState(prev => cleanupRooms(mergeRoomStates(prev, e.data.state)));
+          }
+        };
+        if (broadcastChannel) {
+          broadcastChannel.onmessage = handleBroadcast;
+        }
+        
+        // Listen for localStorage changes (backup)
         const handleStorage = (e) => {
           if (e.key === STORAGE_KEY && e.newValue) {
             try { 
@@ -299,13 +321,12 @@
         };
         window.addEventListener('storage', handleStorage);
         
-        // Faster sync interval for real-time updates
+        // Periodic sync as fallback
         const syncInterval = setInterval(() => {
           const stored = getStorage();
           if (stored) {
             setGlobalState(prev => {
               const merged = cleanupRooms(mergeRoomStates(prev, stored));
-              // Only update if different
               if (JSON.stringify(prev) !== JSON.stringify(merged)) {
                 return merged;
               }
@@ -316,7 +337,8 @@
         
         return () => { 
           window.removeEventListener('storage', handleStorage); 
-          clearInterval(syncInterval); 
+          clearInterval(syncInterval);
+          if (broadcastChannel) broadcastChannel.onmessage = null;
         };
       }, []);
 
@@ -384,7 +406,14 @@
         }
       }, []);
 
+      // Send transaction - skip if amount is 0 to avoid RPC errors
       const sendTransaction = async (toAddress, amountInEth, fromAddress) => {
+        // Skip transaction if amount is 0
+        if (amountInEth <= 0) {
+          console.log('Skipping transaction - amount is 0');
+          return 'skipped';
+        }
+        
         if (!window.ethereum) throw new Error('MetaMask not found');
         const from = fromAddress || wallet.address || (await window.ethereum.request({ method: 'eth_accounts' }))[0];
         if (!from) throw new Error('No wallet address');
@@ -429,7 +458,11 @@
         try {
           if (!currentAddress) { setError('No wallet address'); setProcessing(false); return; }
           
-          await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE, currentAddress);
+          // Only send transaction if entry fee > 0
+          if (CONFIG.ENTRY_FEE > 0) {
+            await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE, currentAddress);
+          }
+          
           const art = getRandomArt();
           newRoomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
           const room = { id: newRoomId, gameNumber: globalState.totalGames + 1, creator: currentAddress, phase: 'waiting', artId: art.id, artName: art.name, maxPlayers: CONFIG.MAX_PLAYERS, players: [currentAddress], pool: CONFIG.ENTRY_FEE, messages: [], votes: {}, endGameVotes: [], winner: null, createdAt: Date.now(), startTime: null, voteDeadline: null, locked: false };
@@ -503,7 +536,10 @@
         if (room.players.includes(currentAddress)) { setCurrentRoomId(roomId); setActiveTab('game'); setProcessing(false); return; }
         
         try {
-          await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE, currentAddress);
+          // Only send transaction if entry fee > 0
+          if (CONFIG.ENTRY_FEE > 0) {
+            await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE, currentAddress);
+          }
           setGlobalState(prev => {
             const r = prev.rooms[roomId];
             if (!r || r.phase !== 'waiting' || r.locked) return prev;
@@ -742,7 +778,11 @@
 
                 {/* Available Rooms - always visible */}
                 <div className="glass rounded-2xl p-6">
-                  <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({availableRooms.length})</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">🚪 Available Rooms ({availableRooms.length})</h3>
+                    <span className="text-xs text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded">Demo Mode - Same Browser Only</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">💡 To test multi-player: Open this page in multiple browser tabs</p>
                   {availableRooms.length === 0 ? <div className="text-center py-8 text-gray-500">No rooms available. Create one!</div> : (
                     <div className="space-y-3">
                       {availableRooms.map(room => (
