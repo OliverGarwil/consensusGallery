@@ -354,6 +354,25 @@
         setProcessing(false);
       };
 
+      // Auto-reconnect wallet on page load
+      useEffect(() => {
+        const autoConnect = async () => {
+          if (typeof window.ethereum !== 'undefined') {
+            try {
+              const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+              if (accounts && accounts.length > 0) {
+                setWallet({ connected: true, address: accounts[0] });
+                getPlayerId(accounts[0]);
+              }
+            } catch (err) {
+              console.log('Auto-connect failed:', err);
+            }
+          }
+        };
+        autoConnect();
+      }, []);
+
+      // Listen for account changes
       useEffect(() => {
         if (typeof window.ethereum !== 'undefined') {
           const handler = (accounts) => {
@@ -365,15 +384,19 @@
         }
       }, []);
 
-      const sendTransaction = async (toAddress, amountInEth) => {
+      const sendTransaction = async (toAddress, amountInEth, fromAddress) => {
         if (!window.ethereum) throw new Error('MetaMask not found');
+        const from = fromAddress || wallet.address || (await window.ethereum.request({ method: 'eth_accounts' }))[0];
+        if (!from) throw new Error('No wallet address');
         const amountWei = '0x' + Math.floor(amountInEth * 1e18).toString(16);
-        return await window.ethereum.request({ method: 'eth_sendTransaction', params: [{ from: wallet.address, to: toAddress, value: amountWei }] });
+        return await window.ethereum.request({ method: 'eth_sendTransaction', params: [{ from, to: toAddress, value: amountWei }] });
       };
 
       const handleCreateRoom = async () => {
+        let currentAddress = wallet.address;
+        
         // Auto-connect wallet if not connected
-        if (!wallet.connected) {
+        if (!wallet.connected || !currentAddress) {
           if (typeof window.ethereum === 'undefined') { 
             setError('Please install MetaMask!'); 
             setTimeout(() => setError(''), 4000); 
@@ -383,9 +406,9 @@
           try {
             const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
             if (accounts && accounts.length > 0) {
-              setWallet({ connected: true, address: accounts[0] });
-              getPlayerId(accounts[0]);
-              // Continue with room creation after wallet connected
+              currentAddress = accounts[0];
+              setWallet({ connected: true, address: currentAddress });
+              getPlayerId(currentAddress);
             } else {
               setError('Failed to connect wallet');
               setTimeout(() => setError(''), 4000);
@@ -404,11 +427,9 @@
         
         let newRoomId = null;
         try {
-          // Get current wallet address (may have just connected)
-          const currentAddress = wallet.address || (await window.ethereum.request({ method: 'eth_accounts' }))[0];
           if (!currentAddress) { setError('No wallet address'); setProcessing(false); return; }
           
-          await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
+          await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE, currentAddress);
           const art = getRandomArt();
           newRoomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
           const room = { id: newRoomId, gameNumber: globalState.totalGames + 1, creator: currentAddress, phase: 'waiting', artId: art.id, artName: art.name, maxPlayers: CONFIG.MAX_PLAYERS, players: [currentAddress], pool: CONFIG.ENTRY_FEE, messages: [], votes: {}, endGameVotes: [], winner: null, createdAt: Date.now(), startTime: null, voteDeadline: null, locked: false };
@@ -417,7 +438,13 @@
           setActiveTab('game');
           setSuccess('Room Created!');
           setTimeout(() => setSuccess(''), 3000);
-        } catch (err) { setError(err.code === 4001 ? 'Transaction cancelled' : 'Failed to create room'); setTimeout(() => setError(''), 4000); setProcessing(false); return; }
+        } catch (err) { 
+          console.error('Create room error:', err);
+          setError(err.code === 4001 ? 'Transaction cancelled' : 'Failed to create room: ' + (err.message || '')); 
+          setTimeout(() => setError(''), 4000); 
+          setProcessing(false); 
+          return; 
+        }
         setProcessing(false);
         if (newRoomId) {
           setTimeout(() => {
@@ -431,8 +458,10 @@
       };
 
       const handleJoinRoom = async (roomId) => {
+        let currentAddress = wallet.address;
+        
         // Auto-connect wallet if not connected
-        if (!wallet.connected) {
+        if (!wallet.connected || !currentAddress) {
           if (typeof window.ethereum === 'undefined') { 
             setError('Please install MetaMask!'); 
             setTimeout(() => setError(''), 4000); 
@@ -442,8 +471,9 @@
           try {
             const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
             if (accounts && accounts.length > 0) {
-              setWallet({ connected: true, address: accounts[0] });
-              getPlayerId(accounts[0]);
+              currentAddress = accounts[0];
+              setWallet({ connected: true, address: currentAddress });
+              getPlayerId(currentAddress);
             } else {
               setError('Failed to connect wallet');
               setTimeout(() => setError(''), 4000);
@@ -460,8 +490,6 @@
           setProcessing(true);
         }
         
-        // Get current wallet address
-        const currentAddress = wallet.address || (await window.ethereum.request({ method: 'eth_accounts' }))[0];
         if (!currentAddress) { setError('No wallet address'); setProcessing(false); return; }
         
         // Re-check room state from storage for latest data
@@ -475,7 +503,7 @@
         if (room.players.includes(currentAddress)) { setCurrentRoomId(roomId); setActiveTab('game'); setProcessing(false); return; }
         
         try {
-          await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE);
+          await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE, currentAddress);
           setGlobalState(prev => {
             const r = prev.rooms[roomId];
             if (!r || r.phase !== 'waiting' || r.locked) return prev;
@@ -486,7 +514,11 @@
           setActiveTab('game');
           setSuccess('Joined Room!');
           setTimeout(() => setSuccess(''), 3000);
-        } catch (err) { setError(err.code === 4001 ? 'Transaction cancelled' : 'Failed to join'); setTimeout(() => setError(''), 4000); }
+        } catch (err) { 
+          console.error('Join room error:', err);
+          setError(err.code === 4001 ? 'Transaction cancelled' : 'Failed to join: ' + (err.message || '')); 
+          setTimeout(() => setError(''), 4000); 
+        }
         setProcessing(false);
       };
 
