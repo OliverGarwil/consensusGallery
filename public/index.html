@@ -3,438 +3,800 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Consensus Gallery | GenLayer</title>
+  <title>Consensus Gallery | GenLayer Game</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { primary: { 300: '#a5b4fc', 400: '#818cf8', 500: '#667eea', 600: '#5a67d8' } } } }
+    }
+  </script>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%); min-height: 100vh; font-family: 'Inter', sans-serif; }
     .gradient-text { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .glass { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
-    .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .gradient-text-gold { background: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .glass { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); }
     .btn-success { background: linear-gradient(135deg, #10B981 0%, #059669 100%); }
+    .btn-warning { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .pulse-dot { animation: pulse 2s ease-in-out infinite; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fade-in { animation: fadeIn 0.5s ease-out; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .animate-spin { animation: spin 1s linear infinite; }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    .fade-in { animation: fadeIn 0.3s ease; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+    .chat-scroll { max-height: 400px; overflow-y: auto; }
+    .chat-scroll::-webkit-scrollbar { width: 6px; }
+    .chat-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+    .chat-scroll::-webkit-scrollbar-thumb { background: rgba(102,126,234,0.3); border-radius: 3px; }
   </style>
 </head>
 <body>
   <div id="root"></div>
   
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-    // ========== CONFIG ==========
-    // 👇👇👇 部署合约后在这里更新地址 👇👇👇
-    const CONTRACT_ADDRESS = '0x93b8A5b05516ECb9E6a6F10d0b80fe913Aff99BE';
-    const RPC_URL = 'https://rpc.studio.genlayer.com';
-    const AI_TIMEOUT = 30000; // 30 seconds before AI joins
-    // =============================
+    const CONTRACT = {
+      ADDRESS: '0x93b8A5b05516ECb9E6a6F10d0b80fe913Aff99BE',
+      NETWORK: 'GenLayer Studio',
+      CHAIN_ID: '0x' + (61999).toString(16),
+      RPC_URL: 'https://rpc.studio.genlayer.com',
+    };
 
-    const ART = [
-      { id: 1, name: 'Starry Night', url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/400px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
-      { id: 2, name: 'The Scream', url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg/400px-Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg' },
-      { id: 3, name: 'Great Wave', url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Tsunami_by_hokusai_19th_century.jpg/400px-Tsunami_by_hokusai_19th_century.jpg' },
-      { id: 4, name: 'Girl Pearl', url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/1665_Girl_with_a_Pearl_Earring.jpg/400px-1665_Girl_with_a_Pearl_Earring.jpg' },
-      { id: 5, name: 'Mona Lisa', url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg/400px-Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg' },
-      { id: 6, name: 'The Persistence of Memory', url: 'https://upload.wikimedia.org/wikipedia/en/d/dd/The_Persistence_of_Memory.jpg' },
-      { id: 7, name: 'The Birth of Venus', url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg/400px-Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg' },
-      { id: 8, name: 'The Last Supper', url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/48/The_Last_Supper_-_Leonardo_Da_Vinci_-_High_Resolution_32x16.jpg/400px-The_Last_Supper_-_Leonardo_Da_Vinci_-_High_Resolution_32x16.jpg' },
+    const CONFIG = {
+      MAX_PLAYERS: 5,
+      MIN_PLAYERS: 2,
+      ENTRY_FEE: 0,
+      WINNER_REWARD_PERCENT: 0,  // 去掉奖金池分配
+      MIN_GAME_DURATION: 30,
+      MAX_GAME_DURATION: 3 * 60,
+      VOTE_DURATION: 30,
+      WINNER_EXP: 100,
+      CORRECT_VOTER_EXP: 30,
+      PARTICIPANT_EXP: 10,
+      ROOM_IDLE_TIMEOUT: 60,
+      AI_FILL_DELAY: 30,  // 30秒无人加入则AI陪玩
+      SYNC_INTERVAL: 500,  // Faster sync for better multi-tab experience
+    };
+    
+    // BroadcastChannel for instant cross-tab sync
+    const broadcastChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('consensus_gallery_sync') : null;
+
+    const AI_PLAYERS = [
+      { address: '0xAI00000000000000000000000000000000000001', name: 'ArtBot_Alpha',
+        descriptions: ['This artwork captures profound beauty and emotion.', 'The colors blend harmoniously creating a mesmerizing experience.', 'Deep symbolism in every brushstroke of this masterpiece.']},
+      { address: '0xAI00000000000000000000000000000000000002', name: 'ArtBot_Beta',
+        descriptions: ['The composition draws the eye naturally across the canvas.', 'Light and shadow play together in perfect balance.', 'This piece speaks to the human condition subtly.']},
+      { address: '0xAI00000000000000000000000000000000000003', name: 'ArtBot_Gamma',
+        descriptions: ['A stunning display of artistic technique and vision.', 'The mood here is both haunting and beautiful.', 'Every element serves a purpose in this crafted work.']},
+      { address: '0xAI00000000000000000000000000000000000004', name: 'ArtBot_Delta',
+        descriptions: ['The artist masterfully captures the essence of the subject.', 'There is a timeless quality to this remarkable piece.', 'I am moved by the emotional depth expressed here.']},
     ];
 
-    // AI descriptions for each artwork
-    const AI_DESCRIPTIONS = {
-      1: ["The swirling night sky creates a sense of cosmic energy and movement", "Deep blues and bright yellows dance together in this dreamlike nocturne", "A village sleeps peacefully under the turbulent yet beautiful sky"],
-      2: ["An expression of existential anxiety captured in bold, wavy lines", "The figure seems overwhelmed by the blood-red sky behind them", "Nature itself appears to be screaming alongside the central figure"],
-      3: ["A massive wave threatens tiny boats with its powerful curl", "The foam creates intricate patterns like claws reaching for Mount Fuji", "Nature's raw power contrasted with distant serenity of the mountain"],
-      4: ["Her enigmatic gaze follows you with quiet intensity", "The luminous pearl catches light against the dark background", "Simple composition yet deeply captivating in its intimacy"],
-      5: ["That mysterious smile has puzzled viewers for centuries", "Soft sfumato technique creates an ethereal, dreamlike quality", "The landscape behind her seems to exist in a different realm"],
-      6: ["Melting clocks suggest the fluid nature of time itself", "A surreal dreamscape where nothing is quite as it seems", "Time becomes meaningless in this barren yet fascinating world"],
-      7: ["Beauty emerges from the sea foam on a giant shell", "Graceful figures and flowing fabric create a sense of divine birth", "Renaissance ideals of beauty captured in mythological form"],
-      8: ["Twelve disciples react differently to Jesus's revelation", "Geometric perspective draws us into this pivotal moment", "Each face tells a different story of shock, denial, or sorrow"],
+    const isAIPlayer = (address) => address && address.startsWith('0xAI');
+    const STORAGE_KEY = 'consensus_gallery_data_v2';
+
+    const ART_COLLECTION = [
+      { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/800px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg', fallback: 'https://www.moma.org/media/W1siZiIsIjQ2NzUxNyJdLFsicCIsImNvbnZlcnQiLCItcXVhbGl0eSA5MCAtcmVzaXplIDUxMng1MTJcdTAwM2UiXV0.jpg' },
+      { id: 2, name: 'Persistence of Memory', artist: 'Dali', year: 1931, url: 'https://uploads4.wikiart.org/images/salvador-dali/the-persistence-of-memory-1931.jpg', fallback: 'https://www.dalipaintings.com/images/paintings/the-persistence-of-memory.jpg' },
+      { id: 3, name: 'The Great Wave', artist: 'Hokusai', year: 1831, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Tsunami_by_hokusai_19th_century.jpg/800px-Tsunami_by_hokusai_19th_century.jpg', fallback: 'https://upload.wikimedia.org/wikipedia/commons/0/0a/The_Great_Wave_off_Kanagawa.jpg' },
+      { id: 4, name: 'Girl with Pearl Earring', artist: 'Vermeer', year: 1665, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/1665_Girl_with_a_Pearl_Earring.jpg/800px-1665_Girl_with_a_Pearl_Earring.jpg', fallback: 'https://upload.wikimedia.org/wikipedia/commons/d/d7/Meisje_met_de_parel.jpg' },
+      { id: 5, name: 'The Scream', artist: 'Munch', year: 1893, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg/800px-Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg', fallback: 'https://upload.wikimedia.org/wikipedia/commons/f/f4/The_Scream.jpg' },
+      { id: 6, name: 'Birth of Venus', artist: 'Botticelli', year: 1485, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg/800px-Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg', fallback: 'https://www.uffizi.it/immagini/opere/botticelli-venere/botticelli-nascita-venere.jpg' },
+      { id: 7, name: 'American Gothic', artist: 'Wood', year: 1930, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg/800px-Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg', fallback: 'https://www.artic.edu/iiif/2/b272df73-a965-ac37-4172-be4e99483637/full/843,/0/default.jpg' },
+      { id: 8, name: 'The Kiss', artist: 'Klimt', year: 1908, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg/800px-The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg', fallback: 'https://upload.wikimedia.org/wikipedia/commons/f/f3/Gustav_Klimt_016.jpg' },
+    ];
+
+    const ADJECTIVES = ['Swift', 'Brave', 'Wise', 'Noble', 'Silent', 'Golden', 'Silver', 'Cosmic', 'Mystic', 'Ancient'];
+    const NOUNS = ['Phoenix', 'Dragon', 'Tiger', 'Eagle', 'Wolf', 'Hawk', 'Lion', 'Bear', 'Serpent', 'Falcon'];
+
+    const generatePlayerId = (address) => {
+      const aiPlayer = AI_PLAYERS.find(ai => ai.address === address);
+      if (aiPlayer) return aiPlayer.name;
+      const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+      return `${ADJECTIVES[hash % ADJECTIVES.length]}${NOUNS[(hash * 7) % NOUNS.length]}${(hash % 99) + 1}`;
     };
 
-    const getArt = (id) => ART.find(a => a.id === parseInt(id)) || ART[0];
-    const shortAddr = (a) => {
-      if (!a) return '';
-      if (a.startsWith('AI_')) return '🤖 AI Player';
-      return `${a.slice(0,6)}...${a.slice(-4)}`;
-    };
-    const isAI = (addr) => addr && addr.startsWith('AI_');
+    const shortenAddress = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '';
+    const formatTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
+    const getArt = (id) => ART_COLLECTION.find(a => a.id === id) || ART_COLLECTION[0];
+    const getRandomArt = () => ART_COLLECTION[Math.floor(Math.random() * ART_COLLECTION.length)];
 
-    // Get random AI description for artwork
-    const getAIDescription = (artId) => {
-      const descs = AI_DESCRIPTIONS[artId] || AI_DESCRIPTIONS[1];
-      return descs[Math.floor(Math.random() * descs.length)];
-    };
+    const getStorage = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; } catch { return null; } };
+    const setStorage = (data) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {} };
+    const createInitialState = () => ({ rooms: {}, leaderboard: {}, totalGames: 0, playerIds: {}, gameHistory: [] });
 
-    // RPC helper
-    let rpcId = 0;
-    const rpc = async (method, params = []) => {
-      const res = await fetch(RPC_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params })
+    const cleanupRooms = (state) => {
+      const now = Date.now();
+      const cleanedRooms = {};
+      Object.entries(state.rooms || {}).forEach(([id, room]) => {
+        if (room.phase === 'finished') return;
+        if (room.phase === 'waiting' && room.players.length === 1 && (now - room.createdAt) > CONFIG.ROOM_IDLE_TIMEOUT * 1000) return;
+        cleanedRooms[id] = room;
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
-      return data.result;
+      return { ...state, rooms: cleanedRooms };
     };
 
-    // Contract read
-    const readContract = async (fn, args = []) => {
-      return rpc('gen_call', [{ to: CONTRACT_ADDRESS, data: { function: fn, args } }]);
-    };
-
-    // Contract write (via MetaMask)
-    const writeContract = async (from, fn, args = []) => {
-      if (!window.ethereum) throw new Error('No MetaMask');
-      const callData = JSON.stringify({ function: fn, args });
-      return window.ethereum.request({
-        method: 'eth_sendTransaction',
-        params: [{ from, to: CONTRACT_ADDRESS, data: '0x' + [...callData].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('') }]
+    // Merge room states for sync - keep the most up-to-date version
+    const mergeRoomStates = (localState, remoteState) => {
+      const mergedRooms = { ...localState.rooms };
+      
+      Object.entries(remoteState.rooms || {}).forEach(([id, remoteRoom]) => {
+        const localRoom = mergedRooms[id];
+        
+        if (!localRoom) {
+          // New room from remote
+          mergedRooms[id] = remoteRoom;
+        } else {
+          // Merge: prefer room with more players or later phase
+          const phaseOrder = { waiting: 0, playing: 1, voting: 2, finished: 3 };
+          const localPhase = phaseOrder[localRoom.phase] || 0;
+          const remotePhase = phaseOrder[remoteRoom.phase] || 0;
+          
+          if (remotePhase > localPhase) {
+            // Remote is more advanced
+            mergedRooms[id] = remoteRoom;
+          } else if (remotePhase === localPhase) {
+            // Same phase - merge players and messages
+            const mergedPlayers = [...new Set([...localRoom.players, ...remoteRoom.players])];
+            const mergedMessages = [...localRoom.messages];
+            remoteRoom.messages.forEach(rm => {
+              if (!mergedMessages.find(lm => lm.id === rm.id)) {
+                mergedMessages.push(rm);
+              }
+            });
+            mergedMessages.sort((a, b) => a.timestamp - b.timestamp);
+            
+            const mergedVotes = { ...localRoom.votes, ...remoteRoom.votes };
+            const mergedEndVotes = [...new Set([...(localRoom.endGameVotes || []), ...(remoteRoom.endGameVotes || [])])];
+            
+            mergedRooms[id] = {
+              ...localRoom,
+              ...remoteRoom,
+              players: mergedPlayers,
+              messages: mergedMessages,
+              votes: mergedVotes,
+              endGameVotes: mergedEndVotes,
+              pool: Math.max(localRoom.pool || 0, remoteRoom.pool || 0),
+            };
+          }
+        }
       });
+      
+      return {
+        ...localState,
+        rooms: mergedRooms,
+        leaderboard: { ...localState.leaderboard, ...remoteState.leaderboard },
+        gameHistory: [...new Set([...(localState.gameHistory || []), ...(remoteState.gameHistory || [])])].slice(-100),
+        totalGames: Math.max(localState.totalGames || 0, remoteState.totalGames || 0),
+        playerIds: { ...localState.playerIds, ...remoteState.playerIds },
+      };
     };
 
+    const phaseLabels = { waiting: 'Waiting', playing: 'Playing', voting: 'Voting', finished: 'Finished' };
+    const phaseColors = { waiting: '#6B7280', playing: '#10B981', voting: '#F59E0B', finished: '#8B5CF6' };
     const Spinner = () => <div className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>;
+
+    const ArtDisplay = ({ artId, size = 280 }) => {
+      const art = getArt(artId);
+      const [loaded, setLoaded] = useState(false);
+      const [error, setError] = useState(false);
+      const [imgSrc, setImgSrc] = useState(art.url);
+      const handleError = () => { if (!error && art.fallback) { setError(true); setImgSrc(art.fallback); } };
+      return (
+        <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
+          {!loaded && <div className="absolute inset-0 flex items-center justify-center bg-white/5 rounded-xl"><Spinner /></div>}
+          <img src={imgSrc} alt={art.name} onLoad={() => setLoaded(true)} onError={handleError} crossOrigin="anonymous"
+            className={`w-full h-full object-cover rounded-xl shadow-xl transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`} />
+          {size > 80 && (
+            <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent rounded-b-xl">
+              <div className="text-sm font-medium text-white truncate">{art.name}</div>
+              <div className="text-xs text-gray-300 truncate">{art.artist}, {art.year}</div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // Game Rules Component
+    const GameRules = ({ showRules, setShowRules }) => {
+      if (!showRules) return null;
+      return (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowRules(false)}>
+          <div className="glass rounded-2xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto animate-fade-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold gradient-text">📜 Game Rules</h3>
+              <button onClick={() => setShowRules(false)} className="text-gray-400 hover:text-white text-xl">✕</button>
+            </div>
+            <div className="space-y-4 text-sm text-gray-300">
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">🎮 How to Play</h4>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>Connect your MetaMask wallet</li>
+                  <li>Create a new room or join an existing one</li>
+                  <li>Wait for other players (or AI bots join after {CONFIG.AI_FILL_DELAY}s)</li>
+                  <li>Host starts the game when ready (min 2 players)</li>
+                </ol>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">🎨 Gameplay</h4>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>View the artwork displayed</li>
+                  <li>Write creative descriptions of the art ({CONFIG.MAX_GAME_DURATION / 60} minutes)</li>
+                  <li>After time ends, vote for the best description</li>
+                  <li>Most voted player wins!</li>
+                </ol>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">⭐ XP Rewards</h4>
+                <ul className="space-y-1">
+                  <li>🏆 <span className="text-yellow-400">Win the game:</span> +{CONFIG.WINNER_EXP} XP</li>
+                  <li>✓ <span className="text-green-400">Vote for winner:</span> +{CONFIG.CORRECT_VOTER_EXP} XP</li>
+                  <li>👤 <span className="text-blue-400">Participate:</span> +{CONFIG.PARTICIPANT_EXP} XP</li>
+                </ul>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">⚠️ Important</h4>
+                <ul className="space-y-1">
+                  <li>• Room closes if empty for 60 seconds</li>
+                  <li>• Cannot join after game starts</li>
+                  <li>• AI players auto-join if no one joins</li>
+                  <li>• Vote time: {CONFIG.VOTE_DURATION} seconds</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
 
     function App() {
       const [wallet, setWallet] = useState({ connected: false, address: '' });
-      const [tab, setTab] = useState('lobby');
-      const [roomId, setRoomId] = useState('');
-      const [room, setRoom] = useState(null);
-      const [players, setPlayers] = useState([]);
-      const [messages, setMessages] = useState([]);
-      const [input, setInput] = useState('');
-      const [loading, setLoading] = useState(false);
+      const [globalState, setGlobalState] = useState(() => {
+        const stored = getStorage();
+        return stored ? cleanupRooms({ ...createInitialState(), ...stored }) : createInitialState();
+      });
+      const [activeTab, setActiveTab] = useState('lobby');
+      const [currentRoomId, setCurrentRoomId] = useState(null);
+      const [message, setMessage] = useState('');
       const [error, setError] = useState('');
       const [success, setSuccess] = useState('');
-      const [joinInput, setJoinInput] = useState('');
-      const [waitingRooms, setWaitingRooms] = useState([]);
-      const [roomCreateTime, setRoomCreateTime] = useState(null);
-      const [aiAdded, setAiAdded] = useState(false);
-      const [aiTimeout, setAiTimeout] = useState(null);
-      const [hasAISentMessage, setHasAISentMessage] = useState(false);
-      const [hasAIVoted, setHasAIVoted] = useState(false);
+      const [processing, setProcessing] = useState(false);
+      const [timeLeft, setTimeLeft] = useState(0);
+      const [lastFinishedGameId, setLastFinishedGameId] = useState(null);
+      const [showRules, setShowRules] = useState(false);
+      
+      const globalStateRef = useRef(globalState);
+      globalStateRef.current = globalState;
+      const currentRoomIdRef = useRef(currentRoomId);
+      currentRoomIdRef.current = currentRoomId;
+      const chatEndRef = useRef(null);
+      const currentRoom = currentRoomId ? globalState.rooms[currentRoomId] : null;
 
-      // Connect wallet
-      const connect = async () => {
-        if (!window.ethereum) { setError('Install MetaMask!'); return; }
+      const getPlayerId = useCallback((address) => {
+        if (!address) return '';
+        if (globalState.playerIds[address]) return globalState.playerIds[address];
+        const newId = generatePlayerId(address);
+        setGlobalState(prev => ({ ...prev, playerIds: { ...prev.playerIds, [address]: newId } }));
+        return newId;
+      }, [globalState.playerIds]);
+
+      // Save to localStorage and broadcast to other tabs
+      useEffect(() => { 
+        setStorage(globalState);
+        // Broadcast to other tabs for instant sync
+        if (broadcastChannel) {
+          try {
+            broadcastChannel.postMessage({ type: 'state_update', state: globalState });
+          } catch (e) {}
+        }
+      }, [globalState]);
+      
+      // Cross-tab sync with BroadcastChannel and localStorage
+      useEffect(() => {
+        // Listen for BroadcastChannel messages (instant)
+        const handleBroadcast = (e) => {
+          if (e.data && e.data.type === 'state_update' && e.data.state) {
+            setGlobalState(prev => cleanupRooms(mergeRoomStates(prev, e.data.state)));
+          }
+        };
+        if (broadcastChannel) {
+          broadcastChannel.onmessage = handleBroadcast;
+        }
+        
+        // Listen for localStorage changes (backup)
+        const handleStorage = (e) => {
+          if (e.key === STORAGE_KEY && e.newValue) {
+            try { 
+              const remoteState = JSON.parse(e.newValue);
+              setGlobalState(prev => cleanupRooms(mergeRoomStates(prev, remoteState)));
+            } catch {}
+          }
+        };
+        window.addEventListener('storage', handleStorage);
+        
+        // Periodic sync as fallback
+        const syncInterval = setInterval(() => {
+          const stored = getStorage();
+          if (stored) {
+            setGlobalState(prev => {
+              const merged = cleanupRooms(mergeRoomStates(prev, stored));
+              if (JSON.stringify(prev) !== JSON.stringify(merged)) {
+                return merged;
+              }
+              return prev;
+            });
+          }
+        }, CONFIG.SYNC_INTERVAL);
+        
+        return () => { 
+          window.removeEventListener('storage', handleStorage); 
+          clearInterval(syncInterval);
+          if (broadcastChannel) broadcastChannel.onmessage = null;
+        };
+      }, []);
+
+      // Game timer
+      useEffect(() => {
+        const timer = setInterval(() => {
+          const roomId = currentRoomIdRef.current;
+          if (!roomId) return;
+          const room = globalStateRef.current.rooms[roomId];
+          if (!room || room.phase === 'finished' || room.phase === 'waiting') { setTimeLeft(0); return; }
+          const now = Date.now();
+          const elapsed = Math.floor((now - room.startTime) / 1000);
+          const remaining = room.phase === 'voting' ? Math.max(0, Math.floor((room.voteDeadline - now) / 1000)) : CONFIG.MAX_GAME_DURATION - elapsed;
+          setTimeLeft(Math.max(0, remaining));
+          if (room.phase === 'playing' && elapsed >= CONFIG.MAX_GAME_DURATION) handleStartVoting(roomId);
+          else if (room.phase === 'voting' && remaining <= 0) handleFinalizeGame(roomId);
+        }, 1000);
+        return () => clearInterval(timer);
+      }, []);
+
+      useEffect(() => { if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [currentRoom?.messages?.length]);
+
+      const connectWallet = async () => {
+        if (typeof window.ethereum === 'undefined') { setError('Please install MetaMask!'); setTimeout(() => setError(''), 4000); return; }
+        setProcessing(true);
         try {
           const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-          if (accounts[0]) {
+          if (accounts && accounts.length > 0) {
             setWallet({ connected: true, address: accounts[0] });
-            setSuccess('Connected!');
+            getPlayerId(accounts[0]);
+            setSuccess('Wallet Connected!');
+            setTimeout(() => setSuccess(''), 3000);
           }
-        } catch (e) { setError(e.message); }
+        } catch (err) { setError('Failed to connect wallet'); setTimeout(() => setError(''), 4000); }
+        setProcessing(false);
       };
 
-      // Auto connect
+      // Auto-reconnect wallet on page load
       useEffect(() => {
-        if (window.ethereum) {
-          window.ethereum.request({ method: 'eth_accounts' }).then(accs => {
-            if (accs[0]) setWallet({ connected: true, address: accs[0] });
-          });
+        const autoConnect = async () => {
+          if (typeof window.ethereum !== 'undefined') {
+            try {
+              const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+              if (accounts && accounts.length > 0) {
+                setWallet({ connected: true, address: accounts[0] });
+                getPlayerId(accounts[0]);
+              }
+            } catch (err) {
+              console.log('Auto-connect failed:', err);
+            }
+          }
+        };
+        autoConnect();
+      }, []);
+
+      // Listen for account changes
+      useEffect(() => {
+        if (typeof window.ethereum !== 'undefined') {
+          const handler = (accounts) => {
+            if (accounts.length === 0) setWallet({ connected: false, address: '' });
+            else { setWallet({ connected: true, address: accounts[0] }); getPlayerId(accounts[0]); }
+          };
+          window.ethereum.on('accountsChanged', handler);
+          return () => window.ethereum.removeListener('accountsChanged', handler);
         }
       }, []);
 
-      // Poll waiting rooms list
-      useEffect(() => {
-        const pollRooms = async () => {
-          try {
-            const data = await readContract('get_waiting_rooms', []);
-            if (data) {
-              const rooms = data.split(';;').filter(Boolean).map(r => {
-                const [rid, creator, artId, createTime, pcount] = r.split(':');
-                return { rid, creator, artId, createTime: parseInt(createTime), playerCount: parseInt(pcount) };
-              });
-              setWaitingRooms(rooms);
-            }
-          } catch (e) { console.error('Failed to fetch rooms:', e); }
-        };
-        pollRooms();
-        const interval = setInterval(pollRooms, 5000);
-        return () => clearInterval(interval);
-      }, []);
+      // Send transaction - skip if amount is 0 to avoid RPC errors
+      const sendTransaction = async (toAddress, amountInEth, fromAddress) => {
+        // Skip transaction if amount is 0
+        if (amountInEth <= 0) {
+          console.log('Skipping transaction - amount is 0');
+          return 'skipped';
+        }
+        
+        if (!window.ethereum) throw new Error('MetaMask not found');
+        const from = fromAddress || wallet.address || (await window.ethereum.request({ method: 'eth_accounts' }))[0];
+        if (!from) throw new Error('No wallet address');
+        const amountWei = '0x' + Math.floor(amountInEth * 1e18).toString(16);
+        return await window.ethereum.request({ method: 'eth_sendTransaction', params: [{ from, to: toAddress, value: amountWei }] });
+      };
 
-      // Poll room data
-      useEffect(() => {
-        if (!roomId) return;
-        const poll = async () => {
+      const handleCreateRoom = async () => {
+        let currentAddress = wallet.address;
+        
+        // Auto-connect wallet if not connected
+        if (!wallet.connected || !currentAddress) {
+          if (typeof window.ethereum === 'undefined') { 
+            setError('Please install MetaMask!'); 
+            setTimeout(() => setError(''), 4000); 
+            return; 
+          }
+          setProcessing(true);
           try {
-            const data = await readContract('get_room', [roomId]);
-            if (data) {
-              const [phase, creator, artId, createTime, winner] = data.split(',');
-              setRoom({ phase: parseInt(phase), creator, artId, createTime: parseInt(createTime), winner });
-              if (!roomCreateTime && createTime) {
-                setRoomCreateTime(parseInt(createTime) * 1000);
+            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            if (accounts && accounts.length > 0) {
+              currentAddress = accounts[0];
+              setWallet({ connected: true, address: currentAddress });
+              getPlayerId(currentAddress);
+            } else {
+              setError('Failed to connect wallet');
+              setTimeout(() => setError(''), 4000);
+              setProcessing(false);
+              return;
+            }
+          } catch (err) {
+            setError('Wallet connection cancelled');
+            setTimeout(() => setError(''), 4000);
+            setProcessing(false);
+            return;
+          }
+        } else {
+          setProcessing(true);
+        }
+        
+        let newRoomId = null;
+        try {
+          if (!currentAddress) { setError('No wallet address'); setProcessing(false); return; }
+          
+          // Only send transaction if entry fee > 0
+          if (CONFIG.ENTRY_FEE > 0) {
+            await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE, currentAddress);
+          }
+          
+          const art = getRandomArt();
+          newRoomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+          const room = { id: newRoomId, gameNumber: globalState.totalGames + 1, creator: currentAddress, phase: 'waiting', artId: art.id, artName: art.name, maxPlayers: CONFIG.MAX_PLAYERS, players: [currentAddress], pool: CONFIG.ENTRY_FEE, messages: [], votes: {}, endGameVotes: [], winner: null, createdAt: Date.now(), startTime: null, voteDeadline: null, locked: false };
+          setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [newRoomId]: room }, totalGames: prev.totalGames + 1 }));
+          setCurrentRoomId(newRoomId);
+          setActiveTab('game');
+          setSuccess('Room Created!');
+          setTimeout(() => setSuccess(''), 3000);
+        } catch (err) { 
+          console.error('Create room error:', err);
+          setError(err.code === 4001 ? 'Transaction cancelled' : 'Failed to create room: ' + (err.message || '')); 
+          setTimeout(() => setError(''), 4000); 
+          setProcessing(false); 
+          return; 
+        }
+        setProcessing(false);
+        if (newRoomId) {
+          setTimeout(() => {
+            setGlobalState(prev => {
+              const room = prev.rooms[newRoomId];
+              if (!room || room.phase !== 'waiting' || room.players.length > 1) return prev;
+              return { ...prev, rooms: { ...prev.rooms, [newRoomId]: { ...room, players: [...room.players, ...AI_PLAYERS.map(ai => ai.address)] } } };
+            });
+          }, CONFIG.AI_FILL_DELAY * 1000);
+        }
+      };
+
+      const handleJoinRoom = async (roomId) => {
+        let currentAddress = wallet.address;
+        
+        // Auto-connect wallet if not connected
+        if (!wallet.connected || !currentAddress) {
+          if (typeof window.ethereum === 'undefined') { 
+            setError('Please install MetaMask!'); 
+            setTimeout(() => setError(''), 4000); 
+            return; 
+          }
+          setProcessing(true);
+          try {
+            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            if (accounts && accounts.length > 0) {
+              currentAddress = accounts[0];
+              setWallet({ connected: true, address: currentAddress });
+              getPlayerId(currentAddress);
+            } else {
+              setError('Failed to connect wallet');
+              setTimeout(() => setError(''), 4000);
+              setProcessing(false);
+              return;
+            }
+          } catch (err) {
+            setError('Wallet connection cancelled');
+            setTimeout(() => setError(''), 4000);
+            setProcessing(false);
+            return;
+          }
+        } else {
+          setProcessing(true);
+        }
+        
+        if (!currentAddress) { setError('No wallet address'); setProcessing(false); return; }
+        
+        // Re-check room state from storage for latest data
+        const latestState = getStorage();
+        const room = latestState?.rooms?.[roomId] || globalState.rooms[roomId];
+        
+        if (!room) { setError('Room not found'); setTimeout(() => setError(''), 3000); setProcessing(false); return; }
+        if (room.phase !== 'waiting') { setError('Game already started - cannot join'); setTimeout(() => setError(''), 3000); setProcessing(false); return; }
+        if (room.locked) { setError('Room is locked'); setTimeout(() => setError(''), 3000); setProcessing(false); return; }
+        if (room.players.length >= room.maxPlayers) { setError('Room is full'); setTimeout(() => setError(''), 3000); setProcessing(false); return; }
+        if (room.players.includes(currentAddress)) { setCurrentRoomId(roomId); setActiveTab('game'); setProcessing(false); return; }
+        
+        try {
+          // Only send transaction if entry fee > 0
+          if (CONFIG.ENTRY_FEE > 0) {
+            await sendTransaction(CONTRACT.ADDRESS, CONFIG.ENTRY_FEE, currentAddress);
+          }
+          setGlobalState(prev => {
+            const r = prev.rooms[roomId];
+            if (!r || r.phase !== 'waiting' || r.locked) return prev;
+            if (r.players.includes(currentAddress)) return prev;
+            return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...r, players: [...r.players, currentAddress], pool: (r.pool || 0) + CONFIG.ENTRY_FEE } } };
+          });
+          setCurrentRoomId(roomId);
+          setActiveTab('game');
+          setSuccess('Joined Room!');
+          setTimeout(() => setSuccess(''), 3000);
+        } catch (err) { 
+          console.error('Join room error:', err);
+          setError(err.code === 4001 ? 'Transaction cancelled' : 'Failed to join: ' + (err.message || '')); 
+          setTimeout(() => setError(''), 4000); 
+        }
+        setProcessing(false);
+      };
+
+      const handleStartGame = (roomId) => {
+        const room = globalState.rooms[roomId];
+        if (!room || room.phase !== 'waiting' || room.players.length < CONFIG.MIN_PLAYERS) return;
+        
+        // Lock room and start game
+        setGlobalState(prev => ({ 
+          ...prev, 
+          rooms: { 
+            ...prev.rooms, 
+            [roomId]: { 
+              ...prev.rooms[roomId], 
+              phase: 'playing', 
+              locked: true, 
+              startTime: Date.now() 
+            } 
+          } 
+        }));
+        
+        // AI players send messages
+        room.players.filter(isAIPlayer).forEach((aiAddr, idx) => {
+          const ai = AI_PLAYERS.find(a => a.address === aiAddr);
+          if (!ai) return;
+          setTimeout(() => {
+            setGlobalState(prev => {
+              const r = prev.rooms[roomId];
+              if (!r || r.phase !== 'playing') return prev;
+              return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...r, messages: [...r.messages, { id: Date.now() + idx, author: aiAddr, content: ai.descriptions[Math.floor(Math.random() * ai.descriptions.length)], timestamp: Date.now() }] } } };
+            });
+          }, 5000 + Math.random() * 25000 + idx * 3000);
+        });
+      };
+
+      const handleSendMessage = () => {
+        if (!wallet.connected || !currentRoomId || !message.trim()) return;
+        const room = globalState.rooms[currentRoomId];
+        if (!room || room.phase !== 'playing') return;
+        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, messages: [...room.messages, { id: Date.now(), author: wallet.address, content: message.trim(), timestamp: Date.now() }] } } }));
+        setMessage('');
+      };
+
+      const handleVoteEndGame = () => {
+        if (!wallet.connected || !currentRoomId) return;
+        const room = globalState.rooms[currentRoomId];
+        if (!room || room.phase !== 'playing' || (Date.now() - room.startTime) / 1000 < CONFIG.MIN_GAME_DURATION || room.endGameVotes.includes(wallet.address)) return;
+        const newVotes = [...room.endGameVotes, wallet.address];
+        const shouldEnd = newVotes.length >= Math.ceil(room.players.length / 2);
+        setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, endGameVotes: newVotes, ...(shouldEnd ? { phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } : {}) } } }));
+      };
+
+      const handleStartVoting = (roomId) => {
+        setGlobalState(prev => {
+          const room = prev.rooms[roomId];
+          if (!room || room.phase !== 'playing') return prev;
+          return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...room, phase: 'voting', voteDeadline: Date.now() + CONFIG.VOTE_DURATION * 1000 } } };
+        });
+        setTimeout(() => {
+          setGlobalState(prev => {
+            const room = prev.rooms[roomId];
+            if (!room || room.phase !== 'voting') return prev;
+            const authors = [...new Set(room.messages.map(m => m.author))];
+            const humans = authors.filter(a => !isAIPlayer(a));
+            const newVotes = { ...room.votes };
+            room.players.filter(isAIPlayer).forEach(ai => {
+              if (!newVotes[ai] && authors.includes(ai)) {
+                newVotes[ai] = humans.length > 0 ? humans[Math.floor(Math.random() * humans.length)] : authors[Math.floor(Math.random() * authors.length)];
               }
-            }
-            const pdata = await readContract('get_players', [roomId]);
-            if (pdata) {
-              setPlayers(pdata.split(',').filter(Boolean));
-            }
-            const msgs = await readContract('get_messages', [roomId]);
-            if (msgs) {
-              setMessages(msgs.split(';;').filter(Boolean).map(m => {
-                const [author, content, time] = m.split('|');
-                return { author, content, time };
-              }));
-            }
-          } catch (e) { console.error(e); }
-        };
-        poll();
-        const interval = setInterval(poll, 3000);
-        return () => clearInterval(interval);
-      }, [roomId]);
+            });
+            return { ...prev, rooms: { ...prev.rooms, [roomId]: { ...room, votes: newVotes } } };
+          });
+        }, 3000);
+      };
 
-      // AI timeout - add AI player if no one joins in 30 seconds
-      useEffect(() => {
-        if (!roomId || !room || room.phase !== 0 || aiAdded) return;
-        if (room.creator.toLowerCase() !== wallet.address.toLowerCase()) return;
-        if (players.length > 1) return; // Someone joined
+      const handleVote = (targetAddress) => {
+        if (!wallet.connected || !currentRoomId) return;
+        const room = globalState.rooms[currentRoomId];
+        if (!room || room.phase !== 'voting' || room.votes[wallet.address]) { setError('Already voted'); setTimeout(() => setError(''), 3000); return; }
+        const newVotes = { ...room.votes, [wallet.address]: targetAddress };
+        const authors = [...new Set(room.messages.map(m => m.author))];
+        if (authors.every(p => newVotes[p])) setGlobalState(prev => finalizeGameState(prev, currentRoomId, newVotes));
+        else setGlobalState(prev => ({ ...prev, rooms: { ...prev.rooms, [currentRoomId]: { ...room, votes: newVotes } } }));
+      };
 
-        const timer = setTimeout(async () => {
-          if (players.length === 1) {
-            setSuccess('No players joined. Adding AI companion...');
-            try {
-              await writeContract(wallet.address, 'add_ai_player', [roomId]);
-              setAiAdded(true);
-              setSuccess('AI player added! You can start the game now.');
-            } catch (e) { 
-              setError('Failed to add AI: ' + e.message); 
-            }
-          }
-        }, AI_TIMEOUT);
+      const handleFinalizeGame = (roomId) => {
+        setGlobalState(prev => {
+          const room = prev.rooms[roomId];
+          if (!room || room.phase === 'finished') return prev;
+          return finalizeGameState(prev, roomId, room.votes || {});
+        });
+      };
 
-        setAiTimeout(timer);
-        return () => clearTimeout(timer);
-      }, [roomId, room, players, aiAdded, wallet.address]);
-
-      // AI sends message after game starts (with delay)
-      useEffect(() => {
-        if (!roomId || !room || room.phase !== 1 || hasAISentMessage) return;
-        if (room.creator.toLowerCase() !== wallet.address.toLowerCase()) return;
+      const finalizeGameState = (prevState, roomId, votes) => {
+        const room = prevState.rooms[roomId];
+        if (!room || room.phase === 'finished') return prevState;
+        const authors = [...new Set(room.messages.map(m => m.author))];
+        if (authors.length === 0) { const newRooms = { ...prevState.rooms }; delete newRooms[roomId]; return { ...prevState, rooms: newRooms }; }
+        const voteCount = {}; authors.forEach(addr => { voteCount[addr] = 0; });
+        Object.values(votes).forEach(target => { if (voteCount[target] !== undefined) voteCount[target]++; });
+        const maxVotes = Math.max(...Object.values(voteCount), 0);
+        const winners = authors.filter(addr => voteCount[addr] === maxVotes);
+        const winnerAddress = winners[Math.floor(Math.random() * winners.length)];
+        const pool = room.pool || (room.players.length * CONFIG.ENTRY_FEE);
+        const winnerReward = pool * (CONFIG.WINNER_REWARD_PERCENT / 100);
+        const newLeaderboard = JSON.parse(JSON.stringify(prevState.leaderboard));
         
-        const hasAI = players.some(p => isAI(p));
-        if (!hasAI) return;
-
-        const timer = setTimeout(async () => {
-          const aiMsg = getAIDescription(room.artId);
-          try {
-            await writeContract(wallet.address, 'ai_send_msg', [roomId, aiMsg]);
-            setHasAISentMessage(true);
-          } catch (e) { console.error('AI message failed:', e); }
-        }, 3000 + Math.random() * 5000); // 3-8 seconds delay
-
-        return () => clearTimeout(timer);
-      }, [roomId, room?.phase, players, hasAISentMessage]);
-
-      // AI votes after voting starts (with delay)
-      useEffect(() => {
-        if (!roomId || !room || room.phase !== 2 || hasAIVoted) return;
-        if (room.creator.toLowerCase() !== wallet.address.toLowerCase()) return;
+        if (!newLeaderboard[winnerAddress]) newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0, totalRewards: 0 };
+        newLeaderboard[winnerAddress].experience += CONFIG.WINNER_EXP;
+        newLeaderboard[winnerAddress].wins += 1;
+        newLeaderboard[winnerAddress].totalRewards = (newLeaderboard[winnerAddress].totalRewards || 0) + winnerReward;
         
-        const hasAI = players.some(p => isAI(p));
-        if (!hasAI) return;
-
-        const timer = setTimeout(async () => {
-          // AI votes for a random human player
-          const humanPlayers = players.filter(p => !isAI(p));
-          if (humanPlayers.length > 0) {
-            const target = humanPlayers[Math.floor(Math.random() * humanPlayers.length)];
-            try {
-              await writeContract(wallet.address, 'ai_vote', [roomId, target]);
-              setHasAIVoted(true);
-            } catch (e) { console.error('AI vote failed:', e); }
-          }
-        }, 2000 + Math.random() * 3000); // 2-5 seconds delay
-
-        return () => clearTimeout(timer);
-      }, [roomId, room?.phase, players, hasAIVoted]);
-
-      // Actions
-      const createRoom = async () => {
-        if (!wallet.connected) { await connect(); return; }
-        setLoading(true);
-        setAiAdded(false);
-        setHasAISentMessage(false);
-        setHasAIVoted(false);
-        try {
-          await writeContract(wallet.address, 'create_room', []);
-          setSuccess('Creating room... Please wait.');
-          setTimeout(async () => {
-            const total = await readContract('get_count', []);
-            const newRoomId = `r${total}`;
-            setRoomId(newRoomId);
-            setRoomCreateTime(Date.now());
-            setTab('game');
-            setSuccess('Room created: ' + newRoomId + '. Waiting for players (AI joins in 30s)');
-          }, 5000);
-        } catch (e) { setError(e.message); }
-        setLoading(false);
+        Object.entries(votes).forEach(([voter, target]) => {
+          if (isAIPlayer(voter)) return;
+          if (!newLeaderboard[voter]) newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0, totalRewards: 0 };
+          newLeaderboard[voter].experience += target === winnerAddress ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP;
+          newLeaderboard[voter].participations += 1;
+        });
+        
+        authors.filter(a => !isAIPlayer(a) && !votes[a]).forEach(addr => {
+          if (!newLeaderboard[addr]) newLeaderboard[addr] = { experience: 0, wins: 0, participations: 0, totalRewards: 0 };
+          newLeaderboard[addr].participations += 1;
+          newLeaderboard[addr].experience += CONFIG.PARTICIPANT_EXP;
+        });
+        
+        const gameRecord = { id: roomId, gameNumber: room.gameNumber, artId: room.artId, artName: room.artName, players: room.players.filter(p => !isAIPlayer(p)), winner: winnerAddress, winnerReward, voteCount, votes, finishedAt: Date.now() };
+        const gameHistory = [...(prevState.gameHistory || []), gameRecord].slice(-100);
+        
+        // Stay on game page to show results - no redirect
+        
+        return { ...prevState, leaderboard: newLeaderboard, gameHistory, rooms: { ...prevState.rooms, [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount, winnerReward } } };
       };
 
-      const joinRoom = async (rid) => {
-        if (!wallet.connected) { await connect(); return; }
-        const targetRoom = rid || joinInput.trim();
-        if (!targetRoom) { setError('Enter room ID'); return; }
-        setLoading(true);
-        setAiAdded(false);
-        setHasAISentMessage(false);
-        setHasAIVoted(false);
-        try {
-          await writeContract(wallet.address, 'join_room', [targetRoom]);
-          setRoomId(targetRoom);
-          setTab('game');
-          setSuccess('Joined room: ' + targetRoom);
-        } catch (e) { setError(e.message); }
-        setLoading(false);
-      };
+      const handleLeaveRoom = () => { setCurrentRoomId(null); setActiveTab('lobby'); setMessage(''); };
 
-      const startGame = async () => {
-        setLoading(true);
-        try {
-          await writeContract(wallet.address, 'start_game', [roomId]);
-          setSuccess('Game started!');
-        } catch (e) { setError(e.message); }
-        setLoading(false);
-      };
+      const availableRooms = useMemo(() => {
+        const now = Date.now();
+        return Object.values(globalState.rooms).filter(r => 
+          r.phase === 'waiting' && 
+          !r.locked && 
+          r.players.length < r.maxPlayers && 
+          !(r.players.length === 1 && (now - r.createdAt) > CONFIG.ROOM_IDLE_TIMEOUT * 1000)
+        );
+      }, [globalState.rooms]);
+      
+      const myRooms = useMemo(() => Object.values(globalState.rooms).filter(r => wallet.connected && r.players.includes(wallet.address) && r.phase !== 'finished'), [globalState.rooms, wallet]);
+      const myGameHistory = useMemo(() => !wallet.connected ? [] : (globalState.gameHistory || []).filter(g => g.players.includes(wallet.address)).reverse().slice(0, 50), [globalState.gameHistory, wallet]);
+      const sortedLeaderboard = useMemo(() => Object.entries(globalState.leaderboard).filter(([addr]) => !isAIPlayer(addr)).map(([address, stats]) => ({ address, playerId: globalState.playerIds[address] || generatePlayerId(address), experience: stats.experience || 0, wins: stats.wins || 0, participations: stats.participations || 0, totalRewards: stats.totalRewards || 0 })).sort((a, b) => b.experience - a.experience || b.wins - a.wins), [globalState.leaderboard, globalState.playerIds]);
 
-      const sendMessage = async () => {
-        if (!input.trim()) return;
-        setLoading(true);
-        try {
-          await writeContract(wallet.address, 'send_msg', [roomId, input.trim()]);
-          setInput('');
-          setSuccess('Message sent!');
-        } catch (e) { setError(e.message); }
-        setLoading(false);
-      };
-
-      const startVoting = async () => {
-        setLoading(true);
-        try {
-          await writeContract(wallet.address, 'start_vote', [roomId]);
-          setSuccess('Voting started!');
-        } catch (e) { setError(e.message); }
-        setLoading(false);
-      };
-
-      const vote = async (target) => {
-        setLoading(true);
-        try {
-          await writeContract(wallet.address, 'vote', [roomId, target]);
-          setSuccess('Voted!');
-        } catch (e) { setError(e.message); }
-        setLoading(false);
-      };
-
-      const finishGame = async () => {
-        setLoading(true);
-        try {
-          await writeContract(wallet.address, 'finish', [roomId]);
-          setSuccess('Game finished!');
-        } catch (e) { setError(e.message); }
-        setLoading(false);
-      };
-
-      const leaveRoom = () => { 
-        setRoomId(''); 
-        setRoom(null); 
-        setPlayers([]);
-        setMessages([]); 
-        setTab('lobby'); 
-        setRoomCreateTime(null);
-        setAiAdded(false);
-        setHasAISentMessage(false);
-        setHasAIVoted(false);
-        if (aiTimeout) clearTimeout(aiTimeout);
-      };
-
-      // Clear notifications
-      useEffect(() => {
-        if (error) setTimeout(() => setError(''), 4000);
-        if (success) setTimeout(() => setSuccess(''), 3000);
-      }, [error, success]);
-
-      const phases = ['Waiting', 'Playing', 'Voting', 'Finished'];
-      const art = room ? getArt(room.artId) : null;
-
-      // Calculate time remaining for AI
-      const getAICountdown = () => {
-        if (!roomCreateTime || room?.phase !== 0 || players.length > 1) return null;
-        const elapsed = Date.now() - roomCreateTime;
-        const remaining = Math.max(0, Math.ceil((AI_TIMEOUT - elapsed) / 1000));
-        return remaining > 0 ? remaining : null;
-      };
+      const gameElapsed = currentRoom?.startTime ? Math.floor((Date.now() - currentRoom.startTime) / 1000) : 0;
+      const canVoteEnd = currentRoom?.phase === 'playing' && gameElapsed >= CONFIG.MIN_GAME_DURATION;
+      const endVoteProgress = currentRoom ? `${currentRoom.endGameVotes?.length || 0}/${Math.ceil(currentRoom.players.length / 2)}` : '';
+      const myPlayerId = wallet.connected ? (globalState.playerIds[wallet.address] || generatePlayerId(wallet.address)) : '';
+      const myStats = wallet.connected ? (globalState.leaderboard[wallet.address] || { experience: 0, totalRewards: 0 }) : { experience: 0, totalRewards: 0 };
 
       return (
-        <div className="min-h-screen text-gray-200 p-4">
-          {/* Notifications */}
-          {error && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-red-500 rounded-lg fade-in">{error}</div>}
-          {success && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-green-500 rounded-lg fade-in">{success}</div>}
-
-          {/* Header */}
-          <header className="max-w-4xl mx-auto flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold gradient-text">🎨 Consensus Gallery</h1>
-            {wallet.connected ? (
-              <div className="flex items-center gap-2 px-3 py-2 glass rounded-lg">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span className="text-sm">{shortAddr(wallet.address)}</span>
-              </div>
-            ) : (
-              <button onClick={connect} className="btn-primary px-4 py-2 rounded-lg text-white font-medium">
-                Connect Wallet
-              </button>
-            )}
+        <div className="min-h-screen text-gray-200">
+          <GameRules showRules={showRules} setShowRules={setShowRules} />
+          
+          <header className="flex justify-between items-center px-4 md:px-6 py-4 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl btn-primary">🎨</div>
+              <h1 className="text-lg md:text-xl font-bold gradient-text">Consensus Gallery</h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowRules(true)} className="px-3 py-2 glass rounded-lg text-sm hover:bg-white/10 transition">📜 Rules</button>
+              {wallet.connected ? (
+                <div className="flex items-center gap-2 px-3 py-2 glass rounded-xl">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-xs md:text-sm font-medium">{myPlayerId}</span>
+                  <span className="px-2 py-0.5 bg-primary-500/30 rounded text-xs font-bold text-primary-300">{myStats.experience || 0} XP</span>
+                  <span className="text-xs text-gray-400 font-mono">{shortenAddress(wallet.address)}</span>
+                </div>
+              ) : (
+                <button onClick={connectWallet} disabled={processing} className="btn-primary px-4 py-2 rounded-xl text-white text-sm font-semibold flex items-center gap-2">
+                  {processing ? <><Spinner /> Connecting...</> : '🦊 Connect'}
+                </button>
+              )}
+            </div>
           </header>
 
-          {/* Nav */}
-          <nav className="max-w-4xl mx-auto flex gap-2 mb-6">
-            <button onClick={() => setTab('lobby')} className={`px-4 py-2 rounded-lg ${tab === 'lobby' ? 'bg-white/10' : ''}`}>🏠 Lobby</button>
-            <button onClick={() => setTab('game')} className={`px-4 py-2 rounded-lg ${tab === 'game' ? 'bg-white/10' : ''}`}>🎮 Game</button>
+          {error && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-red-500/90 text-white rounded-lg shadow-lg animate-fade-in flex items-center gap-3 max-w-md"><span className="text-sm">{error}</span><button onClick={() => setError('')} className="ml-2">✕</button></div>}
+          {success && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-3 bg-green-500/90 text-white rounded-lg shadow-lg animate-fade-in">✓ {success}</div>}
+
+          <nav className="flex gap-1 px-4 md:px-6 py-3 border-b border-white/5 overflow-x-auto">
+            {[{ id: 'lobby', icon: '🏠', label: 'Lobby' }, { id: 'game', icon: '🎮', label: 'Game', badge: myRooms.length > 0 ? myRooms.length : null }, { id: 'history', icon: '📜', label: 'History' }, { id: 'leaderboard', icon: '🏆', label: 'Rankings' }].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap ${activeTab === tab.id ? 'bg-primary-500/20 border border-primary-500/50 text-primary-300' : 'text-gray-400 hover:bg-white/5'}`}>
+                <span>{tab.icon}</span><span className="hidden sm:inline">{tab.label}</span>
+                {tab.badge && <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full">{tab.badge}</span>}
+              </button>
+            ))}
           </nav>
 
-          <main className="max-w-4xl mx-auto">
-            {/* Lobby */}
-            {tab === 'lobby' && (
-              <div className="space-y-6 fade-in">
-                <div className="glass rounded-xl p-6">
-                  <h2 className="text-xl font-semibold mb-4">Create New Game</h2>
-                  <button onClick={createRoom} disabled={loading} className="btn-primary w-full py-3 rounded-lg text-white font-medium flex items-center justify-center gap-2">
-                    {loading ? <Spinner /> : '✨ Create Room'}
+          <main className="px-4 md:px-6 py-6 max-w-6xl mx-auto">
+            {activeTab === 'lobby' && (
+              <div className="space-y-6 animate-fade-in">
+                <div className="text-center py-6">
+                  <h2 className="text-2xl md:text-3xl font-bold gradient-text mb-2">Consensus Gallery</h2>
+                  <p className="text-gray-400 mb-2">Art Description Game on GenLayer</p>
+                  <button onClick={() => setShowRules(true)} className="text-sm text-primary-400 hover:underline">📜 View Game Rules</button>
+                </div>
+                
+                {/* Quick Rules */}
+                <div className="glass rounded-2xl p-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center text-xs">
+                    <div className="p-2 bg-white/5 rounded-lg"><div className="text-lg mb-1">🏆</div><div className="text-yellow-400 font-bold">+{CONFIG.WINNER_EXP} XP</div><div className="text-gray-500">Win Game</div></div>
+                    <div className="p-2 bg-white/5 rounded-lg"><div className="text-lg mb-1">✓</div><div className="text-green-400 font-bold">+{CONFIG.CORRECT_VOTER_EXP} XP</div><div className="text-gray-500">Correct Vote</div></div>
+                    <div className="p-2 bg-white/5 rounded-lg"><div className="text-lg mb-1">⏱️</div><div className="text-blue-400 font-bold">{CONFIG.MAX_GAME_DURATION / 60} min</div><div className="text-gray-500">Game Time</div></div>
+                    <div className="p-2 bg-white/5 rounded-lg"><div className="text-lg mb-1">👥</div><div className="text-purple-400 font-bold">{CONFIG.MIN_PLAYERS}-{CONFIG.MAX_PLAYERS}</div><div className="text-gray-500">Players</div></div>
+                  </div>
+                </div>
+                
+                {/* Create Game - always visible */}
+                <div className="glass rounded-2xl p-6">
+                  <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
+                  <p className="text-sm text-gray-400 mb-4">Entry: {CONFIG.ENTRY_FEE} GEN | Game: {CONFIG.MAX_GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
+                  <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
+                    {processing ? <><Spinner /> Processing...</> : wallet.connected ? '✨ Create Room' : '🦊 Connect & Create Room'}
                   </button>
-                  <p className="text-xs text-gray-400 mt-2 text-center">If no one joins in 30 seconds, an AI player will join automatically</p>
                 </div>
 
-                {/* Waiting Rooms List */}
-                <div className="glass rounded-xl p-6">
-                  <h2 className="text-xl font-semibold mb-4">🚪 Open Rooms ({waitingRooms.length})</h2>
-                  {waitingRooms.length === 0 ? (
-                    <p className="text-gray-400 text-center py-4">No rooms waiting for players</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {waitingRooms.map(r => (
-                        <div key={r.rid} className="flex items-center justify-between p-3 bg-white/5 rounded-lg hover:bg-white/10">
-                          <div>
-                            <span className="font-medium">{r.rid}</span>
-                            <span className="text-gray-400 text-sm ml-2">by {shortAddr(r.creator)}</span>
-                            <span className="text-gray-400 text-sm ml-2">• {r.playerCount}/5 players</span>
+                {/* Available Rooms - always visible */}
+                <div className="glass rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">🚪 Available Rooms ({availableRooms.length})</h3>
+                    <span className="text-xs text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded">Demo Mode - Same Browser Only</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">💡 To test multi-player: Open this page in multiple browser tabs</p>
+                  {availableRooms.length === 0 ? <div className="text-center py-8 text-gray-500">No rooms available. Create one!</div> : (
+                    <div className="space-y-3">
+                      {availableRooms.map(room => (
+                        <div key={room.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl hover:bg-white/10 transition">
+                          <div className="flex items-center gap-4">
+                            <ArtDisplay artId={room.artId} size={60} />
+                            <div>
+                              <div className="font-medium">{room.artName}</div>
+                              <div className="text-sm text-gray-400">👥 {room.players?.length || 0}/{room.maxPlayers} | Host: {globalState.playerIds[room.creator] || generatePlayerId(room.creator)}</div>
+                              <div className="text-xs text-gray-500">Status: {room.locked ? '🔒 Locked' : '🟢 Open'}</div>
+                            </div>
                           </div>
-                          <button 
-                            onClick={() => joinRoom(r.rid)} 
-                            disabled={loading || r.creator.toLowerCase() === wallet.address.toLowerCase()}
-                            className="btn-success px-4 py-2 rounded-lg text-white text-sm"
-                          >
-                            {r.creator.toLowerCase() === wallet.address.toLowerCase() ? 'Your Room' : 'Join'}
+                          <button onClick={() => handleJoinRoom(room.id)} disabled={processing || room.locked} className={`px-4 py-2 rounded-lg text-white text-sm font-medium ${room.locked ? 'bg-gray-500 cursor-not-allowed' : 'btn-success'}`}>
+                            {processing ? <Spinner /> : room.locked ? 'Locked' : wallet.connected ? 'Join' : 'Connect & Join'}
                           </button>
                         </div>
                       ))}
@@ -442,172 +804,132 @@
                   )}
                 </div>
 
-                <div className="glass rounded-xl p-6">
-                  <h2 className="text-xl font-semibold mb-4">Join by Room ID</h2>
-                  <div className="flex gap-2">
-                    <input 
-                      value={joinInput} 
-                      onChange={e => setJoinInput(e.target.value)} 
-                      placeholder="Enter room ID (e.g., r1)" 
-                      className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-lg"
-                    />
-                    <button onClick={() => joinRoom()} disabled={loading} className="btn-success px-6 py-3 rounded-lg text-white font-medium">
-                      {loading ? <Spinner /> : 'Join'}
-                    </button>
+                {/* My Games - only when connected */}
+                {wallet.connected && myRooms.length > 0 && (
+                  <div className="glass rounded-2xl p-6 border-primary-500/30">
+                    <h3 className="text-lg font-semibold mb-4 text-primary-300">⏳ My Games</h3>
+                    <div className="space-y-3">
+                      {myRooms.map(room => (
+                        <div key={room.id} className="flex items-center justify-between p-4 bg-primary-500/10 rounded-xl">
+                          <div className="flex items-center gap-4">
+                            <ArtDisplay artId={room.artId} size={50} />
+                            <div><div className="font-medium text-sm">{room.artName}</div><div className="text-xs text-gray-400">{phaseLabels[room.phase]} | 👥 {room.players?.length || 0}</div></div>
+                          </div>
+                          <button onClick={() => { setCurrentRoomId(room.id); setActiveTab('game'); }} className="btn-warning px-4 py-2 rounded-lg text-white text-sm font-medium">Enter</button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
-                <div className="glass rounded-xl p-6 text-center text-gray-400">
-                  <p>Contract: <code className="text-xs bg-white/10 px-2 py-1 rounded">{shortAddr(CONTRACT_ADDRESS)}</code></p>
-                  <p className="text-sm mt-2">⛓️ All game data is stored on GenLayer blockchain</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="glass rounded-xl p-4 text-center"><div className="text-2xl mb-1">🎮</div><div className="text-2xl font-bold">{globalState.totalGames}</div><div className="text-xs text-gray-500">Total Games</div></div>
+                  <div className="glass rounded-xl p-4 text-center"><div className="text-2xl mb-1">👥</div><div className="text-2xl font-bold">{Object.keys(globalState.leaderboard).filter(a => !isAIPlayer(a)).length}</div><div className="text-xs text-gray-500">Players</div></div>
                 </div>
               </div>
             )}
 
-            {/* Game */}
-            {tab === 'game' && (
-              <div className="fade-in">
-                {!roomId ? (
-                  <div className="glass rounded-xl p-8 text-center">
-                    <p className="text-gray-400 mb-4">No active game. Create or join a room first!</p>
-                    <button onClick={() => setTab('lobby')} className="btn-primary px-6 py-2 rounded-lg text-white">Go to Lobby</button>
-                  </div>
+            {activeTab === 'game' && (
+              <div className="animate-fade-in">
+                {!currentRoom ? (
+                  <div className="glass rounded-2xl p-8 text-center"><p className="text-gray-400 mb-4">No active game</p><button onClick={() => setActiveTab('lobby')} className="btn-primary px-6 py-3 rounded-xl text-white font-semibold">Go to Lobby</button></div>
                 ) : (
-                  <div className="grid md:grid-cols-2 gap-6">
-                    {/* Left: Art & Info */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div className="space-y-4">
                       <div className="glass rounded-xl p-4">
-                        <div className="flex justify-between items-center mb-3">
-                          <span className="font-medium">Room: {roomId}</span>
-                          <span className={`px-2 py-1 rounded text-sm ${room?.phase === 0 ? 'bg-gray-500/30' : room?.phase === 1 ? 'bg-green-500/30' : room?.phase === 2 ? 'bg-yellow-500/30' : 'bg-purple-500/30'}`}>
-                            {room ? phases[room.phase] : 'Loading...'}
-                          </span>
+                        <div className="flex items-center justify-between">
+                          <span className="px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2" style={{ background: phaseColors[currentRoom.phase] + '20', color: phaseColors[currentRoom.phase] }}><span className="w-2 h-2 rounded-full pulse-dot" style={{ background: phaseColors[currentRoom.phase] }}></span>{phaseLabels[currentRoom.phase]}</span>
+                          {currentRoom.locked && <span className="text-xs text-yellow-500">🔒 Room Locked</span>}
+                          {(currentRoom.phase === 'playing' || currentRoom.phase === 'voting') && <div className={`px-3 py-1.5 rounded-lg ${timeLeft <= 30 ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}><span className="text-xl font-bold font-mono">{formatTime(timeLeft)}</span></div>}
                         </div>
-                        {art && (
-                          <div>
-                            <img src={art.url} alt={art.name} className="w-full h-64 object-cover rounded-lg mb-2" />
-                            <p className="text-center text-sm text-gray-400">{art.name}</p>
+                      </div>
+
+                      <div className="glass rounded-xl p-6 text-center">
+                        <ArtDisplay artId={currentRoom.artId} size={300} />
+                        {currentRoom.phase === 'waiting' && (
+                          <div className="mt-4 p-3 bg-white/5 rounded-lg">
+                            <div className="text-sm text-gray-400 mb-2">Players ({currentRoom.players?.length || 0}/{currentRoom.maxPlayers})</div>
+                            <div className="flex flex-wrap gap-2 justify-center">
+                              {currentRoom.players?.map(addr => (
+                                <span key={addr} className={`px-2 py-1 rounded text-xs ${addr === wallet.address ? 'bg-primary-500/30 text-primary-300' : isAIPlayer(addr) ? 'bg-yellow-500/20 text-yellow-300' : 'bg-white/10'}`}>{isAIPlayer(addr) && '🤖 '}{globalState.playerIds[addr] || generatePlayerId(addr)}{addr === currentRoom.creator && ' 👑'}</span>
+                              ))}
+                            </div>
+                            {currentRoom.creator === wallet.address && currentRoom.players?.length >= CONFIG.MIN_PLAYERS && <button onClick={() => handleStartGame(currentRoomId)} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">🚀 Start Game (locks room)</button>}
+                            {currentRoom.players?.length < CONFIG.MIN_PLAYERS && <p className="text-sm text-yellow-500 mt-3">Waiting for players... (AI joins in {CONFIG.AI_FILL_DELAY}s)</p>}
+                          </div>
+                        )}
+                        {currentRoom.phase === 'playing' && canVoteEnd && (
+                          <div className="mt-4 p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                            <button onClick={handleVoteEndGame} disabled={currentRoom.endGameVotes?.includes(wallet.address)} className={`w-full py-2 rounded-lg font-medium ${currentRoom.endGameVotes?.includes(wallet.address) ? 'bg-white/10 text-gray-500' : 'btn-warning text-white'}`}>{currentRoom.endGameVotes?.includes(wallet.address) ? `✓ Voted (${endVoteProgress})` : `End Early (${endVoteProgress})`}</button>
                           </div>
                         )}
                       </div>
 
-                      {/* Players */}
-                      <div className="glass rounded-xl p-4">
-                        <h3 className="font-medium mb-2">👥 Players ({players.length})</h3>
-                        {players.map((p, i) => (
-                          <div key={i} className={`p-2 rounded mb-1 flex items-center justify-between ${
-                            isAI(p) ? 'bg-blue-500/20' : 
-                            p.toLowerCase() === wallet.address.toLowerCase() ? 'bg-purple-500/20' : 'bg-white/5'
-                          }`}>
-                            <span>
-                              {shortAddr(p)} 
-                              {p.toLowerCase() === room?.creator?.toLowerCase() && ' 👑'} 
-                              {p.toLowerCase() === wallet.address.toLowerCase() && ' (You)'}
-                            </span>
-                            {isAI(p) && <span className="text-xs text-blue-400">AI</span>}
-                          </div>
-                        ))}
-                        
-                        {/* AI Countdown */}
-                        {room?.phase === 0 && room?.creator?.toLowerCase() === wallet.address.toLowerCase() && players.length === 1 && (
-                          <div className="mt-2 p-2 bg-blue-500/10 rounded text-center">
-                            <p className="text-sm text-blue-300 animate-pulse">
-                              🤖 AI joins in {getAICountdown() || '...'} seconds
-                            </p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Actions */}
-                      <div className="space-y-2">
-                        {room?.phase === 0 && room?.creator?.toLowerCase() === wallet.address.toLowerCase() && (
-                          <button onClick={startGame} disabled={loading || players.length < 2} className="btn-success w-full py-3 rounded-lg text-white">
-                            {loading ? <Spinner /> : `Start Game (${players.length}/2+ players)`}
-                          </button>
-                        )}
-                        {room?.phase === 1 && (
-                          <button onClick={startVoting} disabled={loading} className="bg-yellow-500 w-full py-3 rounded-lg text-black font-medium">
-                            {loading ? <Spinner /> : 'End Game & Start Voting'}
-                          </button>
-                        )}
-                        {room?.phase === 2 && (
-                          <button onClick={finishGame} disabled={loading} className="bg-purple-500 w-full py-3 rounded-lg text-white">
-                            {loading ? <Spinner /> : 'Finalize Results'}
-                          </button>
-                        )}
-                        <button onClick={leaveRoom} className="w-full py-2 text-gray-400 hover:text-white">← Leave Room</button>
-                      </div>
+                      {currentRoom.phase === 'finished' && currentRoom.winner && (
+                        <div className="rounded-xl p-6 text-center" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.2))', border: '1px solid rgba(139,92,246,0.3)' }}>
+                          <div className="text-4xl mb-3">🏆</div>
+                          <h3 className="text-xl font-bold mb-2">Game Over!</h3>
+                          <p className="text-sm text-gray-400 mb-2">Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}{isAIPlayer(currentRoom.winner) && ' 🤖'}</p>
+                          {currentRoom.winner === wallet.address && <p className="text-green-400 mt-2">🎉 You won! +{CONFIG.WINNER_EXP} XP</p>}
+                          {currentRoom.winner !== wallet.address && currentRoom.votes?.[wallet.address] === currentRoom.winner && <p className="text-green-400 mt-2">✓ Correct vote! +{CONFIG.CORRECT_VOTER_EXP} XP</p>}
+                          {currentRoom.winner !== wallet.address && currentRoom.votes?.[wallet.address] && currentRoom.votes?.[wallet.address] !== currentRoom.winner && <p className="text-gray-400 mt-2">Participated +{CONFIG.PARTICIPANT_EXP} XP</p>}
+                          <button onClick={handleLeaveRoom} className="btn-primary mt-4 px-6 py-2 rounded-lg text-white font-semibold">Back to Lobby</button>
+                        </div>
+                      )}
+                      {currentRoom.phase !== 'finished' && <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>}
                     </div>
 
-                    {/* Right: Chat & Voting */}
                     <div className="space-y-4">
-                      {/* Messages */}
-                      <div className="glass rounded-xl p-4">
-                        <h3 className="font-medium mb-2">💬 Descriptions</h3>
-                        <div className="h-64 overflow-y-auto space-y-2 mb-3">
-                          {messages.length === 0 ? (
-                            <p className="text-gray-500 text-center py-8">No messages yet</p>
-                          ) : (
-                            messages.map((m, i) => (
-                              <div key={i} className={`p-3 rounded-lg ${
-                                isAI(m.author) ? 'bg-blue-500/20 mr-4' :
-                                m.author.toLowerCase() === wallet.address.toLowerCase() ? 'bg-purple-500/20 ml-4' : 'bg-white/5 mr-4'
-                              }`}>
-                                <div className="text-xs text-gray-400 mb-1">
-                                  {shortAddr(m.author)}
-                                  {isAI(m.author) && ' 🤖'}
-                                </div>
-                                <p className="text-sm">{m.content}</p>
+                      {currentRoom.phase === 'playing' && (
+                        <div className="glass rounded-xl p-5">
+                          <h3 className="font-semibold mb-3">💬 Describe the Art</h3>
+                          <div className="chat-scroll mb-4 space-y-2 p-2 bg-black/20 rounded-lg min-h-[200px]">
+                            {currentRoom.messages?.length === 0 ? <div className="text-center py-8 text-gray-500 text-sm">Start describing!</div> : currentRoom.messages?.map(msg => (
+                              <div key={msg.id} className={`p-3 rounded-lg ${msg.author === wallet.address ? 'bg-primary-500/20 ml-8' : isAIPlayer(msg.author) ? 'bg-yellow-500/10 mr-8' : 'bg-white/5 mr-8'}`}>
+                                <div className="flex justify-between items-start mb-1"><span className="text-xs font-medium text-gray-400">{isAIPlayer(msg.author) && '🤖 '}{globalState.playerIds[msg.author] || generatePlayerId(msg.author)}</span><span className="text-xs text-gray-500">{new Date(msg.timestamp).toLocaleTimeString()}</span></div>
+                                <p className="text-gray-200">{msg.content}</p>
                               </div>
-                            ))
-                          )}
-                        </div>
-                        {room?.phase === 1 && (
-                          <div className="flex gap-2">
-                            <input
-                              value={input}
-                              onChange={e => setInput(e.target.value)}
-                              onKeyPress={e => e.key === 'Enter' && sendMessage()}
-                              placeholder="Describe the artwork..."
-                              className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm"
-                            />
-                            <button onClick={sendMessage} disabled={loading} className="btn-primary px-4 py-2 rounded-lg text-white">
-                              {loading ? <Spinner /> : 'Send'}
-                            </button>
+                            ))}
+                            <div ref={chatEndRef} />
                           </div>
-                        )}
-                      </div>
-
-                      {/* Voting */}
-                      {room?.phase === 2 && (
-                        <div className="glass rounded-xl p-4">
-                          <h3 className="font-medium mb-3">🗳️ Vote for Best Description</h3>
-                          {[...new Set(messages.map(m => m.author))].map(addr => (
-                            <button key={addr} onClick={() => vote(addr)} disabled={loading} className="w-full p-3 mb-2 bg-white/5 rounded-lg text-left hover:bg-white/10">
-                              <div className="font-medium">
-                                {shortAddr(addr)}
-                                {isAI(addr) && ' 🤖'}
-                              </div>
-                              <div className="text-sm text-gray-400 truncate">
-                                {messages.find(m => m.author === addr)?.content}
-                              </div>
-                            </button>
-                          ))}
+                          <div className="flex gap-2">
+                            <input type="text" value={message} onChange={e => setMessage(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleSendMessage()} placeholder="Describe the art..." className="flex-1 px-4 py-2 rounded-lg bg-black/30 border border-white/10 text-gray-200 focus:outline-none focus:border-primary-500/50" />
+                            <button onClick={handleSendMessage} disabled={!message.trim()} className={`px-4 py-2 rounded-lg font-medium ${message.trim() ? 'btn-success text-white' : 'bg-white/10 text-gray-500'}`}>Send</button>
+                          </div>
                         </div>
                       )}
 
-                      {/* Winner */}
-                      {room?.phase === 3 && room?.winner && (
-                        <div className="glass rounded-xl p-6 text-center">
-                          <div className="text-4xl mb-2">🏆</div>
-                          <h3 className="text-xl font-bold mb-2">Winner!</h3>
-                          <p className="text-purple-400">
-                            {shortAddr(room.winner)}
-                            {isAI(room.winner) && ' 🤖'}
-                          </p>
-                          {room.winner.toLowerCase() === wallet.address.toLowerCase() && (
-                            <p className="text-green-400 mt-2">Congratulations! +100 XP</p>
-                          )}
+                      {currentRoom.phase === 'voting' && (
+                        <div className="glass rounded-xl p-5">
+                          <h3 className="font-semibold mb-2">🗳️ Vote for Best Description</h3>
+                          <p className="text-xs text-gray-400 mb-4">Correct vote = +{CONFIG.CORRECT_VOTER_EXP} XP | Participate = +{CONFIG.PARTICIPANT_EXP} XP</p>
+                          <div className="space-y-3">
+                            {[...new Set(currentRoom.messages?.map(m => m.author) || [])].map(addr => {
+                              const authorMsgs = currentRoom.messages?.filter(m => m.author === addr) || [];
+                              const isVoted = currentRoom.votes?.[wallet.address] === addr;
+                              const voteCount = Object.values(currentRoom.votes || {}).filter(v => v === addr).length;
+                              return (
+                                <div key={addr} onClick={() => !currentRoom.votes?.[wallet.address] && handleVote(addr)} className={`p-4 rounded-lg transition ${isVoted ? 'bg-primary-500/20 border border-primary-500/40' : 'bg-white/5 border border-white/5'} ${!currentRoom.votes?.[wallet.address] ? 'cursor-pointer hover:bg-white/10' : ''}`}>
+                                  <div className="flex justify-between items-center mb-2"><span className="text-sm font-medium">{isAIPlayer(addr) && '🤖 '}{globalState.playerIds[addr] || generatePlayerId(addr)}{addr === wallet.address ? ' (You)' : ''}</span><span className="text-yellow-500 text-sm">🗳️ {voteCount}</span></div>
+                                  <div className="space-y-1">{authorMsgs.slice(0, 2).map((m, i) => <p key={i} className="text-sm text-gray-300 truncate">"{m.content}"</p>)}</div>
+                                  {isVoted && <div className="mt-2 text-sm text-primary-400">✓ Your vote</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {currentRoom.phase === 'finished' && (
+                        <div className="glass rounded-xl p-5">
+                          <h3 className="font-semibold mb-4">📊 Final Results</h3>
+                          <div className="space-y-2">
+                            {[...new Set(currentRoom.messages?.map(m => m.author) || [])].sort((a, b) => (currentRoom.voteCount?.[b] || 0) - (currentRoom.voteCount?.[a] || 0)).map(addr => (
+                              <div key={addr} className={`p-3 rounded-lg ${addr === currentRoom.winner ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
+                                <div className="flex justify-between"><span>{addr === currentRoom.winner && '🏆 '}{isAIPlayer(addr) && '🤖 '}{globalState.playerIds[addr] || generatePlayerId(addr)}</span><span className="text-yellow-500">{currentRoom.voteCount?.[addr] || 0} votes</span></div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -615,11 +937,63 @@
                 )}
               </div>
             )}
+
+            {activeTab === 'history' && (
+              <div className="glass rounded-2xl p-6 animate-fade-in">
+                <h2 className="text-2xl font-bold text-center gradient-text mb-6">📜 Game History</h2>
+                {!wallet.connected ? <div className="text-center py-10 text-gray-500">Connect wallet to view history</div> : myGameHistory.length === 0 ? <div className="text-center py-10 text-gray-500">No games played yet</div> : (
+                  <div className="space-y-3">
+                    {myGameHistory.map((game) => {
+                      const isWinner = game.winner === wallet.address;
+                      const votedCorrectly = game.votes?.[wallet.address] === game.winner;
+                      const xpEarned = isWinner ? CONFIG.WINNER_EXP : (votedCorrectly ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP);
+                      const isRecent = game.id === lastFinishedGameId;
+                      return (
+                        <div key={game.id} className={`p-4 rounded-xl ${isRecent ? 'ring-2 ring-primary-500 bg-primary-500/10' : isWinner ? 'bg-yellow-500/10 border border-yellow-500/20' : 'bg-white/5'}`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <ArtDisplay artId={game.artId} size={50} />
+                              <div>
+                                <div className="font-medium text-sm">{game.artName}</div>
+                                <div className="text-xs text-gray-400">Game #{game.gameNumber} | {new Date(game.finishedAt).toLocaleDateString()}</div>
+                                <div className="text-xs text-gray-500 mt-1">Winner: {globalState.playerIds[game.winner] || generatePlayerId(game.winner)}{isAIPlayer(game.winner) && ' 🤖'}</div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              {isWinner ? <div className="text-yellow-400 font-bold">🏆 Winner!</div> : votedCorrectly ? <div className="text-green-400 text-sm">✓ Correct Vote</div> : <div className="text-gray-400 text-sm">Participated</div>}
+                              <div className="text-sm text-primary-300">+{xpEarned} XP</div>
+                              {isWinner && game.winnerReward > 0 && <div className="text-sm text-yellow-300">+{game.winnerReward.toFixed(4)} GEN</div>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'leaderboard' && (
+              <div className="glass rounded-2xl p-6 animate-fade-in">
+                <h2 className="text-2xl font-bold text-center gradient-text-gold mb-6">🏆 Rankings</h2>
+                {sortedLeaderboard.length === 0 ? <div className="text-center py-10 text-gray-500">No players yet</div> : (
+                  <div className="space-y-2">
+                    {sortedLeaderboard.map((p, idx) => (
+                      <div key={p.address} className={`grid grid-cols-[40px_1fr_80px_80px_60px] items-center p-3 rounded-lg ${idx === 0 ? 'bg-yellow-500/10' : p.address === wallet.address ? 'bg-primary-500/10' : 'bg-white/3'}`}>
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${idx < 3 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-white/10'}`}>{idx < 3 ? ['🥇', '🥈', '🥉'][idx] : idx + 1}</div>
+                        <span className="text-sm font-medium truncate">{p.playerId}{p.address === wallet.address && ' (You)'}</span>
+                        <div className="text-center"><div className="font-bold text-primary-300">{p.experience}</div><div className="text-[10px] text-gray-500">XP</div></div>
+                        <div className="text-center"><div className="font-bold text-green-400">{p.wins}</div><div className="text-[10px] text-gray-500">Wins</div></div>
+                        <div className="text-center"><div className="font-bold text-gray-300">{p.participations}</div><div className="text-[10px] text-gray-500">Games</div></div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </main>
 
-          <footer className="max-w-4xl mx-auto text-center py-8 text-gray-500 text-sm">
-            Powered by <a href="https://genlayer.com" className="text-purple-400">GenLayer</a>
-          </footer>
+          <footer className="text-center py-6 border-t border-white/5 mt-8"><p className="text-sm text-gray-500">Consensus Gallery | <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a></p></footer>
         </div>
       );
     }
