@@ -52,7 +52,7 @@
     const CONFIG = {
       MAX_PLAYERS: 5,
       MIN_PLAYERS: 2,
-      ENTRY_FEE: 0,
+      ENTRY_FEE: 0.0001,  // 0.0001 GEN 入场费
       WINNER_REWARD_PERCENT: 0,  // 去掉奖金池分配
       MIN_GAME_DURATION: 30,
       MAX_GAME_DURATION: 3 * 60,
@@ -239,6 +239,13 @@
                   <li>🏆 <span className="text-yellow-400">Win the game:</span> +{CONFIG.WINNER_EXP} XP</li>
                   <li>✓ <span className="text-green-400">Vote for winner:</span> +{CONFIG.CORRECT_VOTER_EXP} XP</li>
                   <li>👤 <span className="text-blue-400">Participate:</span> +{CONFIG.PARTICIPANT_EXP} XP</li>
+                </ul>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">💰 Entry Fee</h4>
+                <ul className="space-y-1">
+                  <li>• Create/Join room costs <span className="text-yellow-400">{CONFIG.ENTRY_FEE} GEN</span></li>
+                  <li>• Fee is sent to contract on-chain</li>
                 </ul>
               </div>
               <div className="p-3 bg-white/5 rounded-lg">
@@ -662,30 +669,43 @@
         const winnerReward = pool * (CONFIG.WINNER_REWARD_PERCENT / 100);
         const newLeaderboard = JSON.parse(JSON.stringify(prevState.leaderboard));
         
+        // 记录每个玩家的XP明细
+        const xpDetails = {};
+        
         if (!newLeaderboard[winnerAddress]) newLeaderboard[winnerAddress] = { experience: 0, wins: 0, participations: 0, totalRewards: 0 };
         newLeaderboard[winnerAddress].experience += CONFIG.WINNER_EXP;
         newLeaderboard[winnerAddress].wins += 1;
         newLeaderboard[winnerAddress].totalRewards = (newLeaderboard[winnerAddress].totalRewards || 0) + winnerReward;
+        xpDetails[winnerAddress] = { winner: CONFIG.WINNER_EXP, vote: 0, participate: 0, total: CONFIG.WINNER_EXP };
         
         Object.entries(votes).forEach(([voter, target]) => {
           if (isAIPlayer(voter)) return;
           if (!newLeaderboard[voter]) newLeaderboard[voter] = { experience: 0, wins: 0, participations: 0, totalRewards: 0 };
-          newLeaderboard[voter].experience += target === winnerAddress ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP;
+          const voteXP = target === winnerAddress ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP;
+          newLeaderboard[voter].experience += voteXP;
           newLeaderboard[voter].participations += 1;
+          if (!xpDetails[voter]) xpDetails[voter] = { winner: 0, vote: 0, participate: 0, total: 0 };
+          if (target === winnerAddress) {
+            xpDetails[voter].vote = CONFIG.CORRECT_VOTER_EXP;
+          } else {
+            xpDetails[voter].participate = CONFIG.PARTICIPANT_EXP;
+          }
+          xpDetails[voter].total = (xpDetails[voter].winner || 0) + (xpDetails[voter].vote || 0) + (xpDetails[voter].participate || 0);
         });
         
         authors.filter(a => !isAIPlayer(a) && !votes[a]).forEach(addr => {
           if (!newLeaderboard[addr]) newLeaderboard[addr] = { experience: 0, wins: 0, participations: 0, totalRewards: 0 };
           newLeaderboard[addr].participations += 1;
           newLeaderboard[addr].experience += CONFIG.PARTICIPANT_EXP;
+          if (!xpDetails[addr]) xpDetails[addr] = { winner: 0, vote: 0, participate: CONFIG.PARTICIPANT_EXP, total: CONFIG.PARTICIPANT_EXP };
         });
         
-        const gameRecord = { id: roomId, gameNumber: room.gameNumber, artId: room.artId, artName: room.artName, players: room.players.filter(p => !isAIPlayer(p)), winner: winnerAddress, winnerReward, voteCount, votes, finishedAt: Date.now() };
+        const gameRecord = { id: roomId, gameNumber: room.gameNumber, artId: room.artId, artName: room.artName, players: room.players.filter(p => !isAIPlayer(p)), winner: winnerAddress, winnerReward, voteCount, votes, xpDetails, finishedAt: Date.now() };
         const gameHistory = [...(prevState.gameHistory || []), gameRecord].slice(-100);
         
         // Stay on game page to show results - no redirect
         
-        return { ...prevState, leaderboard: newLeaderboard, gameHistory, rooms: { ...prevState.rooms, [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount, winnerReward } } };
+        return { ...prevState, leaderboard: newLeaderboard, gameHistory, rooms: { ...prevState.rooms, [roomId]: { ...room, phase: 'finished', votes, winner: winnerAddress, voteCount, winnerReward, xpDetails } } };
       };
 
       const handleLeaveRoom = () => { setCurrentRoomId(null); setActiveTab('lobby'); setMessage(''); };
@@ -869,11 +889,28 @@
                         <div className="rounded-xl p-6 text-center" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.2))', border: '1px solid rgba(139,92,246,0.3)' }}>
                           <div className="text-4xl mb-3">🏆</div>
                           <h3 className="text-xl font-bold mb-2">Game Over!</h3>
-                          <p className="text-sm text-gray-400 mb-2">Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}{isAIPlayer(currentRoom.winner) && ' 🤖'}</p>
-                          {currentRoom.winner === wallet.address && <p className="text-green-400 mt-2">🎉 You won! +{CONFIG.WINNER_EXP} XP</p>}
-                          {currentRoom.winner !== wallet.address && currentRoom.votes?.[wallet.address] === currentRoom.winner && <p className="text-green-400 mt-2">✓ Correct vote! +{CONFIG.CORRECT_VOTER_EXP} XP</p>}
-                          {currentRoom.winner !== wallet.address && currentRoom.votes?.[wallet.address] && currentRoom.votes?.[wallet.address] !== currentRoom.winner && <p className="text-gray-400 mt-2">Participated +{CONFIG.PARTICIPANT_EXP} XP</p>}
-                          <button onClick={handleLeaveRoom} className="btn-primary mt-4 px-6 py-2 rounded-lg text-white font-semibold">Back to Lobby</button>
+                          <p className="text-sm text-gray-400 mb-3">Winner: {globalState.playerIds[currentRoom.winner] || generatePlayerId(currentRoom.winner)}{isAIPlayer(currentRoom.winner) && ' 🤖'}</p>
+                          
+                          {/* 显示玩家XP明细 */}
+                          {currentRoom.xpDetails?.[wallet.address] && (
+                            <div className="bg-white/10 rounded-lg p-3 mb-3 text-left">
+                              <div className="text-sm font-medium text-gray-300 mb-2">📊 Your XP Breakdown:</div>
+                              <div className="space-y-1 text-sm">
+                                {currentRoom.xpDetails[wallet.address].winner > 0 && (
+                                  <div className="flex justify-between"><span className="text-yellow-400">🏆 Won the game</span><span className="text-yellow-400">+{currentRoom.xpDetails[wallet.address].winner} XP</span></div>
+                                )}
+                                {currentRoom.xpDetails[wallet.address].vote > 0 && (
+                                  <div className="flex justify-between"><span className="text-green-400">✓ Voted for winner</span><span className="text-green-400">+{currentRoom.xpDetails[wallet.address].vote} XP</span></div>
+                                )}
+                                {currentRoom.xpDetails[wallet.address].participate > 0 && (
+                                  <div className="flex justify-between"><span className="text-blue-400">👤 Participated</span><span className="text-blue-400">+{currentRoom.xpDetails[wallet.address].participate} XP</span></div>
+                                )}
+                                <div className="border-t border-white/10 pt-1 mt-1 flex justify-between font-bold"><span className="text-primary-300">Total</span><span className="text-primary-300">+{currentRoom.xpDetails[wallet.address].total} XP</span></div>
+                              </div>
+                            </div>
+                          )}
+                          
+                          <button onClick={handleLeaveRoom} className="btn-primary mt-2 px-6 py-2 rounded-lg text-white font-semibold">Back to Lobby</button>
                         </div>
                       )}
                       {currentRoom.phase !== 'finished' && <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>}
@@ -944,9 +981,8 @@
                 {!wallet.connected ? <div className="text-center py-10 text-gray-500">Connect wallet to view history</div> : myGameHistory.length === 0 ? <div className="text-center py-10 text-gray-500">No games played yet</div> : (
                   <div className="space-y-3">
                     {myGameHistory.map((game) => {
+                      const myXP = game.xpDetails?.[wallet.address] || { winner: 0, vote: 0, participate: 0, total: 0 };
                       const isWinner = game.winner === wallet.address;
-                      const votedCorrectly = game.votes?.[wallet.address] === game.winner;
-                      const xpEarned = isWinner ? CONFIG.WINNER_EXP : (votedCorrectly ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP);
                       const isRecent = game.id === lastFinishedGameId;
                       return (
                         <div key={game.id} className={`p-4 rounded-xl ${isRecent ? 'ring-2 ring-primary-500 bg-primary-500/10' : isWinner ? 'bg-yellow-500/10 border border-yellow-500/20' : 'bg-white/5'}`}>
@@ -960,9 +996,13 @@
                               </div>
                             </div>
                             <div className="text-right">
-                              {isWinner ? <div className="text-yellow-400 font-bold">🏆 Winner!</div> : votedCorrectly ? <div className="text-green-400 text-sm">✓ Correct Vote</div> : <div className="text-gray-400 text-sm">Participated</div>}
-                              <div className="text-sm text-primary-300">+{xpEarned} XP</div>
-                              {isWinner && game.winnerReward > 0 && <div className="text-sm text-yellow-300">+{game.winnerReward.toFixed(4)} GEN</div>}
+                              {/* XP明细 */}
+                              <div className="space-y-0.5 text-xs">
+                                {myXP.winner > 0 && <div className="text-yellow-400">🏆 +{myXP.winner} XP</div>}
+                                {myXP.vote > 0 && <div className="text-green-400">✓ +{myXP.vote} XP</div>}
+                                {myXP.participate > 0 && <div className="text-blue-400">👤 +{myXP.participate} XP</div>}
+                              </div>
+                              <div className="text-sm text-primary-300 font-bold mt-1">Total: +{myXP.total || (isWinner ? CONFIG.WINNER_EXP : CONFIG.PARTICIPANT_EXP)} XP</div>
                             </div>
                           </div>
                         </div>
