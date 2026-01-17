@@ -109,11 +109,22 @@
         body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params })
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error.message || 'RPC Error');
+      if (data.error) {
+        console.error('RPC Error:', data.error);
+        // 更友好的错误提示
+        if (data.error.message?.includes('Internal')) {
+          throw new Error('Contract call failed. Please check if contract is deployed correctly.');
+        }
+        throw new Error(data.error.message || 'RPC Error');
+      }
       return data.result;
     };
 
     const readContract = async (fn, args = []) => {
+      if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
+        return null;
+      }
+      
       try {
         const result = await rpcCall('gen_call', [{ 
           to: CONTRACT_ADDRESS, 
@@ -121,21 +132,28 @@
         }]);
         return result;
       } catch (e) {
-        console.error(`Read ${fn} failed:`, e);
+        // 静默处理读取错误，避免频繁显示错误
+        console.warn(`Read ${fn} failed:`, e.message);
         return null;
       }
     };
 
     const writeContract = async (from, fn, args = []) => {
-      if (!window.ethereum) throw new Error('MetaMask not found');
+      if (!window.ethereum) throw new Error('Please install MetaMask!');
+      
       const callData = JSON.stringify({ function: fn, args });
       const hexData = '0x' + [...callData].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
       
-      const txHash = await window.ethereum.request({
-        method: 'eth_sendTransaction',
-        params: [{ from, to: CONTRACT_ADDRESS, data: hexData }]
-      });
-      return txHash;
+      try {
+        const txHash = await window.ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{ from, to: CONTRACT_ADDRESS, data: hexData }]
+        });
+        return txHash;
+      } catch (e) {
+        if (e.code === 4001) throw new Error('Transaction cancelled');
+        throw new Error(e.message || 'Transaction failed');
+      }
     };
 
     // ========== Components ==========
@@ -479,27 +497,66 @@
 
       const handleCreateRoom = async () => {
         if (!wallet.connected) { await connectWallet(); return; }
+        
+        if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
+          setError('Please deploy contract and update CONTRACT_ADDRESS first!');
+          return;
+        }
+        
         setProcessing(true);
         try {
-          await writeContract(wallet.address, 'create_room', []);
-          setSuccess('Creating room on-chain...');
+          // 发送创建房间交易
+          const txHash = await writeContract(wallet.address, 'create_room', []);
+          setSuccess('Transaction sent! Waiting for confirmation...');
           
-          // Wait for transaction and poll for new room
-          setTimeout(async () => {
-            const count = await readContract('get_game_count', []);
-            const newRoomId = `r${count}`;
-            setCurrentRoomId(newRoomId);
-            setRoomCreateTime(Date.now());
-            setAiAdded(false);
-            setAiMessageSent(false);
-            setAiVoted(false);
-            setActiveTab('game');
-            setSuccess('Room created: ' + newRoomId);
-          }, 3000);
+          // 等待交易确认后轮询
+          let attempts = 0;
+          const pollNewRoom = async () => {
+            attempts++;
+            try {
+              // 获取等待中的房间列表
+              const roomsData = await readContract('get_waiting_rooms', []);
+              if (roomsData) {
+                const rooms = roomsData.split(';;').filter(Boolean);
+                // 找到我创建的房间
+                for (const r of rooms) {
+                  const [rid, creator] = r.split(':');
+                  if (creator && creator.toLowerCase() === wallet.address.toLowerCase()) {
+                    setCurrentRoomId(rid);
+                    setRoomCreateTime(Date.now());
+                    setAiAdded(false);
+                    setAiMessageSent(false);
+                    setAiVoted(false);
+                    setActiveTab('game');
+                    setSuccess('Room created: ' + rid);
+                    setProcessing(false);
+                    return;
+                  }
+                }
+              }
+              
+              if (attempts < 20) {
+                setTimeout(pollNewRoom, 2000);
+              } else {
+                setError('Room creation timeout. Check your transaction.');
+                setProcessing(false);
+              }
+            } catch (e) {
+              console.error('Poll error:', e);
+              if (attempts < 20) {
+                setTimeout(pollNewRoom, 2000);
+              } else {
+                setProcessing(false);
+              }
+            }
+          };
+          
+          setTimeout(pollNewRoom, 3000);
+          
         } catch (e) { 
           setError(e.message || 'Failed to create room'); 
+          setProcessing(false);
         }
-        setProcessing(false);
       };
 
       const handleJoinRoom = async (rid) => {
@@ -663,11 +720,18 @@
             {/* LOBBY */}
             {activeTab === 'lobby' && (
               <div className="space-y-6 animate-fade-in">
+                {/* Contract Warning */}
+                {CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000' && (
+                  <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-4 text-center">
+                    <p className="text-red-400 text-sm">⚠️ Contract not deployed! Please deploy <code className="bg-black/30 px-1 rounded">consensus_gallery_online.py</code> to GenLayer Studio and update CONTRACT_ADDRESS.</p>
+                  </div>
+                )}
+                
                 {/* Create Game */}
                 <div className="glass rounded-2xl p-6">
                   <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
                   <p className="text-sm text-gray-400 mb-4">Game: {CONFIG.MAX_GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
-                  <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
+                  <button onClick={handleCreateRoom} disabled={processing || CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000'} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white disabled:opacity-50">
                     {processing ? <><Spinner /> Processing...</> : wallet.connected ? '✨ Create Room' : '🦊 Connect & Create'}
                   </button>
                 </div>
