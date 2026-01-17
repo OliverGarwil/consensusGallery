@@ -52,8 +52,8 @@
     const CONFIG = {
       MAX_PLAYERS: 5,
       MIN_PLAYERS: 2,
-      ENTRY_FEE: 0.0000,  // 0.0001 GEN 入场费
-      WINNER_REWARD_PERCENT: 0,  // 去掉奖金池分配
+      ENTRY_FEE: 0,
+      WINNER_REWARD_PERCENT: 0,
       MIN_GAME_DURATION: 30,
       MAX_GAME_DURATION: 3 * 60,
       VOTE_DURATION: 30,
@@ -61,8 +61,8 @@
       CORRECT_VOTER_EXP: 30,
       PARTICIPANT_EXP: 10,
       ROOM_IDLE_TIMEOUT: 60,
-      AI_FILL_DELAY: 30,  // 30秒无人加入则AI陪玩
-      SYNC_INTERVAL: 500,  // Faster sync for better multi-tab experience
+      AI_FILL_DELAY: 30,
+      SYNC_INTERVAL: 500,
     };
     
     // BroadcastChannel for instant cross-tab sync
@@ -239,13 +239,6 @@
                   <li>🏆 <span className="text-yellow-400">Win the game:</span> +{CONFIG.WINNER_EXP} XP</li>
                   <li>✓ <span className="text-green-400">Vote for winner:</span> +{CONFIG.CORRECT_VOTER_EXP} XP</li>
                   <li>👤 <span className="text-blue-400">Participate:</span> +{CONFIG.PARTICIPANT_EXP} XP</li>
-                </ul>
-              </div>
-              <div className="p-3 bg-white/5 rounded-lg">
-                <h4 className="font-semibold text-white mb-2">💰 Entry Fee</h4>
-                <ul className="space-y-1">
-                  <li>• Create/Join room costs <span className="text-yellow-400">{CONFIG.ENTRY_FEE} GEN</span></li>
-                  <li>• Fee is sent to contract on-chain</li>
                 </ul>
               </div>
               <div className="p-3 bg-white/5 rounded-lg">
@@ -790,7 +783,7 @@
                 {/* Create Game - always visible */}
                 <div className="glass rounded-2xl p-6">
                   <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
-                  <p className="text-sm text-gray-400 mb-4">Entry: {CONFIG.ENTRY_FEE} GEN | Game: {CONFIG.MAX_GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
+                  <p className="text-sm text-gray-400 mb-4">Game: {CONFIG.MAX_GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
                   <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
                     {processing ? <><Spinner /> Processing...</> : wallet.connected ? '✨ Create Room' : '🦊 Connect & Create Room'}
                   </button>
