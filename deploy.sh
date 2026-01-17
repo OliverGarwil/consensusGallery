@@ -19,7 +19,7 @@ check_requirements() {
 # Install GenLayer CLI
 install_genlayer_cli() {
     echo "📦 Installing GenLayer CLI..."
-    npm install -g genlayer-cli
+    npm install -g genlayer
     echo "✅ GenLayer CLI installed"
 }
 

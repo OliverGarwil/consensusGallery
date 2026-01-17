@@ -24,13 +24,23 @@ consensus-gallery-blockchain/
 
 ## 🚀 Deployment
 
+### 合约文件说明
+
+| 文件 | 说明 | 推荐场景 |
+|------|------|----------|
+| `contracts/minimal.py` | **最简化版** - 推荐先部署这个 | 首次测试 |
+| `contracts/consensus_gallery_simple.py` | 简化版 | 功能测试 |
+| `contracts/consensus_gallery.py` | 完整版 | 生产环境 |
+
+**建议**: 先用 `minimal.py` 测试部署是否成功，再尝试完整版。
+
 ### Step 1: Deploy the Smart Contract to GenLayer
 
 #### Option A: Using GenLayer CLI
 
 ```bash
-# Install GenLayer CLI
-npm install -g genlayer-cli
+# Install GenLayer CLI (correct package name is "genlayer", not "genlayer-cli")
+npm install -g genlayer
 
 # Configure network (choose one)
 genlayer network localnet      # For local development
@@ -41,13 +51,29 @@ genlayer network testnet-asimov # For testnet
 genlayer deploy --contract contracts/consensus_gallery.py --args "YOUR_TREASURY_ADDRESS"
 ```
 
-#### Option B: Using GenLayer Studio
+#### Option B: Using GenLayer Studio (Recommended for beginners)
+
+This is the **easiest method** - no CLI installation required!
 
 1. Go to [GenLayer Studio](https://studio.genlayer.com)
-2. Create a new project
-3. Copy the contract code from `contracts/consensus_gallery.py`
-4. Deploy with your treasury address as constructor argument
-5. Note the deployed contract address
+2. Connect your wallet
+3. Click "Contracts" → "New Contract"
+4. Copy the contract code from `contracts/consensus_gallery.py`
+5. Click "Deploy"
+6. Enter your treasury address when prompted
+7. **Copy the deployed contract address** (you'll need this!)
+
+#### Option C: Using Local GenLayer (Advanced)
+
+```bash
+# Clone and run GenLayer Studio locally
+git clone https://github.com/genlayerlabs/genlayer-studio
+cd genlayer-studio
+npm install -g genlayer
+genlayer up
+
+# Then deploy via the local Studio UI at http://localhost:8080
+```
 
 ### Step 2: Update Contract Address
 
