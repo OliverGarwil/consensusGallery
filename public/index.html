@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Consensus Gallery | GenLayer Game</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { primary: { 300: '#a5b4fc', 400: '#818cf8', 500: '#667eea', 600: '#5a67d8' } } } }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%); min-height: 100vh; font-family: 'Inter', sans-serif; }
+    .gradient-text { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .gradient-text-gold { background: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .glass { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); }
+    .btn-success { background: linear-gradient(135deg, #10B981 0%, #059669 100%); }
+    .btn-warning { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .pulse-dot { animation: pulse 2s ease-in-out infinite; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin 1s linear infinite; }
+    .chat-scroll { max-height: 400px; overflow-y: auto; }
+    .chat-scroll::-webkit-scrollbar { width: 6px; }
+    .chat-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+    .chat-scroll::-webkit-scrollbar-thumb { background: rgba(102,126,234,0.3); border-radius: 3px; }
+    .online-badge { background: linear-gradient(135deg, #10B981 0%, #059669 100%); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+    // ========== CONFIGURATION ==========
+    // 👇👇👇 部署合约后更新这个地址 👇👇👇
+    const CONTRACT_ADDRESS = '0x42301B2Cda8dCE74816db1eCC3Ca2857572cd3f4';
+    const RPC_URL = 'https://rpc.studio.genlayer.com';
+    const CHAIN_ID = '0x' + (61999).toString(16);
+    // ===================================
+
+    const CONFIG = {
+      MAX_PLAYERS: 5,
+      MIN_PLAYERS: 2,
+      MIN_GAME_DURATION: 30,
+      MAX_GAME_DURATION: 3 * 60,
+      VOTE_DURATION: 30,
+      WINNER_EXP: 100,
+      CORRECT_VOTER_EXP: 30,
+      PARTICIPANT_EXP: 10,
+      AI_FILL_DELAY: 30,
+      POLL_INTERVAL: 2000,
+    };
+
+    // AI player descriptions
+    const AI_DESCRIPTIONS = [
+      "This artwork captures profound beauty and emotion through its masterful composition.",
+      "The colors blend harmoniously creating a mesmerizing visual experience.",
+      "Deep symbolism emerges from every brushstroke of this masterpiece.",
+      "The composition draws the eye naturally across the canvas with perfect balance.",
+      "Light and shadow play together in perfect harmony here.",
+      "This piece speaks to the human condition in subtle yet powerful ways.",
+      "A stunning display of artistic technique and creative vision.",
+      "The mood conveyed here is both haunting and beautiful.",
+    ];
+
+    const ART_COLLECTION = [
+      { id: 1, name: 'Starry Night', artist: 'Van Gogh', year: 1889, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/800px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg' },
+      { id: 2, name: 'Persistence of Memory', artist: 'Dali', year: 1931, url: 'https://uploads4.wikiart.org/images/salvador-dali/the-persistence-of-memory-1931.jpg' },
+      { id: 3, name: 'The Great Wave', artist: 'Hokusai', year: 1831, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Tsunami_by_hokusai_19th_century.jpg/800px-Tsunami_by_hokusai_19th_century.jpg' },
+      { id: 4, name: 'Girl with Pearl Earring', artist: 'Vermeer', year: 1665, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/1665_Girl_with_a_Pearl_Earring.jpg/800px-1665_Girl_with_a_Pearl_Earring.jpg' },
+      { id: 5, name: 'The Scream', artist: 'Munch', year: 1893, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg/800px-Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg' },
+      { id: 6, name: 'Birth of Venus', artist: 'Botticelli', year: 1485, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg/800px-Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg' },
+      { id: 7, name: 'American Gothic', artist: 'Wood', year: 1930, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg/800px-Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg' },
+      { id: 8, name: 'The Kiss', artist: 'Klimt', year: 1908, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg/800px-The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg' },
+    ];
+
+    const getArt = (id) => ART_COLLECTION.find(a => a.id === parseInt(id)) || ART_COLLECTION[0];
+    const shortenAddress = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '';
+    const formatTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
+    const isAI = (addr) => addr && addr.startsWith('AI_');
+
+    const generatePlayerId = (address) => {
+      if (isAI(address)) return 'ArtBot_' + address.slice(3);
+      const adjs = ['Swift', 'Brave', 'Wise', 'Noble', 'Silent', 'Golden', 'Silver', 'Cosmic', 'Mystic', 'Ancient'];
+      const nouns = ['Phoenix', 'Dragon', 'Tiger', 'Eagle', 'Wolf', 'Hawk', 'Lion', 'Bear', 'Serpent', 'Falcon'];
+      const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+      return `${adjs[hash % 10]}${nouns[(hash * 7) % 10]}${(hash % 99) + 1}`;
+    };
+
+    // ========== GenLayer RPC Helpers ==========
+    let rpcId = 0;
+    
+    const rpcCall = async (method, params = []) => {
+      const res = await fetch(RPC_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message || 'RPC Error');
+      return data.result;
+    };
+
+    const readContract = async (fn, args = []) => {
+      try {
+        const result = await rpcCall('gen_call', [{ 
+          to: CONTRACT_ADDRESS, 
+          data: { function: fn, args } 
+        }]);
+        return result;
+      } catch (e) {
+        console.error(`Read ${fn} failed:`, e);
+        return null;
+      }
+    };
+
+    const writeContract = async (from, fn, args = []) => {
+      if (!window.ethereum) throw new Error('MetaMask not found');
+      const callData = JSON.stringify({ function: fn, args });
+      const hexData = '0x' + [...callData].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+      
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{ from, to: CONTRACT_ADDRESS, data: hexData }]
+      });
+      return txHash;
+    };
+
+    // ========== Components ==========
+    const phaseLabels = { '0': 'Waiting', '1': 'Playing', '2': 'Voting', '3': 'Finished' };
+    const phaseColors = { '0': '#6B7280', '1': '#10B981', '2': '#F59E0B', '3': '#8B5CF6' };
+    const Spinner = () => <div className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>;
+
+    const ArtDisplay = ({ artId, size = 280 }) => {
+      const art = getArt(artId);
+      const [loaded, setLoaded] = useState(false);
+      return (
+        <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
+          {!loaded && <div className="absolute inset-0 flex items-center justify-center bg-white/5 rounded-xl"><Spinner /></div>}
+          <img src={art.url} alt={art.name} onLoad={() => setLoaded(true)} crossOrigin="anonymous"
+            className={`w-full h-full object-cover rounded-xl shadow-xl transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`} />
+          {size > 80 && (
+            <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent rounded-b-xl">
+              <div className="text-sm font-medium text-white truncate">{art.name}</div>
+              <div className="text-xs text-gray-300 truncate">{art.artist}, {art.year}</div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const GameRules = ({ showRules, setShowRules }) => {
+      if (!showRules) return null;
+      return (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowRules(false)}>
+          <div className="glass rounded-2xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto animate-fade-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold gradient-text">📜 Game Rules</h3>
+              <button onClick={() => setShowRules(false)} className="text-gray-400 hover:text-white text-xl">✕</button>
+            </div>
+            <div className="space-y-4 text-sm text-gray-300">
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">🎮 How to Play</h4>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>Connect your MetaMask wallet</li>
+                  <li>Create a new room or join an existing one</li>
+                  <li>Wait for other players (AI joins after {CONFIG.AI_FILL_DELAY}s)</li>
+                  <li>Host starts the game when ready (min 2 players)</li>
+                </ol>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">🎨 Gameplay</h4>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>View the artwork displayed</li>
+                  <li>Write creative descriptions ({CONFIG.MAX_GAME_DURATION / 60} minutes)</li>
+                  <li>Vote for the best description</li>
+                  <li>Most voted player wins!</li>
+                </ol>
+              </div>
+              <div className="p-3 bg-white/5 rounded-lg">
+                <h4 className="font-semibold text-white mb-2">⭐ XP Rewards</h4>
+                <ul className="space-y-1">
+                  <li>🏆 <span className="text-yellow-400">Win:</span> +{CONFIG.WINNER_EXP} XP</li>
+                  <li>✓ <span className="text-green-400">Correct vote:</span> +{CONFIG.CORRECT_VOTER_EXP} XP</li>
+                  <li>👤 <span className="text-blue-400">Participate:</span> +{CONFIG.PARTICIPANT_EXP} XP</li>
+                </ul>
+              </div>
+              <div className="p-3 bg-green-500/10 rounded-lg border border-green-500/20">
+                <h4 className="font-semibold text-green-400 mb-2">🌐 Online Multiplayer</h4>
+                <p>All game data is stored on GenLayer blockchain. Play with anyone worldwide!</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ========== Main App ==========
+    function App() {
+      const [wallet, setWallet] = useState({ connected: false, address: '' });
+      const [activeTab, setActiveTab] = useState('lobby');
+      const [currentRoomId, setCurrentRoomId] = useState(null);
+      const [message, setMessage] = useState('');
+      const [error, setError] = useState('');
+      const [success, setSuccess] = useState('');
+      const [processing, setProcessing] = useState(false);
+      const [showRules, setShowRules] = useState(false);
+      
+      // On-chain data
+      const [waitingRooms, setWaitingRooms] = useState([]);
+      const [currentRoom, setCurrentRoom] = useState(null);
+      const [players, setPlayers] = useState([]);
+      const [messages, setMessages] = useState([]);
+      const [votes, setVotes] = useState({});
+      const [endVotes, setEndVotes] = useState([]);
+      const [leaderboard, setLeaderboard] = useState([]);
+      const [gameHistory, setGameHistory] = useState([]);
+      const [myStats, setMyStats] = useState({ exp: 0, wins: 0, parts: 0 });
+      const [playerIds, setPlayerIds] = useState({});
+      const [totalGames, setTotalGames] = useState(0);
+      const [timeLeft, setTimeLeft] = useState(0);
+      
+      // AI state
+      const [aiAdded, setAiAdded] = useState(false);
+      const [aiMessageSent, setAiMessageSent] = useState(false);
+      const [aiVoted, setAiVoted] = useState(false);
+      const [roomCreateTime, setRoomCreateTime] = useState(null);
+
+      const chatEndRef = useRef(null);
+
+      // Get or generate player ID
+      const getPlayerId = useCallback((addr) => {
+        if (!addr) return '';
+        if (playerIds[addr]) return playerIds[addr];
+        const pid = generatePlayerId(addr);
+        setPlayerIds(prev => ({ ...prev, [addr]: pid }));
+        return pid;
+      }, [playerIds]);
+
+      // ===== Wallet Connection =====
+      const connectWallet = async () => {
+        if (!window.ethereum) { setError('Please install MetaMask!'); return; }
+        setProcessing(true);
+        try {
+          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          if (accounts[0]) {
+            setWallet({ connected: true, address: accounts[0] });
+            setSuccess('Wallet Connected!');
+          }
+        } catch (e) { setError('Connection failed'); }
+        setProcessing(false);
+      };
+
+      useEffect(() => {
+        if (window.ethereum) {
+          window.ethereum.request({ method: 'eth_accounts' }).then(accs => {
+            if (accs[0]) setWallet({ connected: true, address: accs[0] });
+          });
+          window.ethereum.on('accountsChanged', (accs) => {
+            if (accs[0]) setWallet({ connected: true, address: accs[0] });
+            else setWallet({ connected: false, address: '' });
+          });
+        }
+      }, []);
+
+      // ===== Poll Chain Data =====
+      useEffect(() => {
+        const pollData = async () => {
+          try {
+            // Get waiting rooms
+            const roomsData = await readContract('get_waiting_rooms', []);
+            if (roomsData) {
+              const rooms = roomsData.split(';;').filter(Boolean).map(r => {
+                const [rid, creator, artId, createTime, pcount] = r.split(':');
+                return { id: rid, creator, artId: parseInt(artId), createTime: parseInt(createTime), playerCount: parseInt(pcount) };
+              });
+              setWaitingRooms(rooms);
+            }
+            
+            // Get total games
+            const count = await readContract('get_game_count', []);
+            if (count !== null) setTotalGames(parseInt(count));
+            
+            // Get leaderboard
+            const lb = await readContract('get_leaderboard', []);
+            if (lb) {
+              const entries = lb.split(';;').filter(Boolean).map(e => {
+                const [addr, pid, stats] = e.split(':');
+                const [exp, wins, parts] = (stats || '0,0,0').split(',');
+                return { address: addr, playerId: pid || generatePlayerId(addr), exp: parseInt(exp), wins: parseInt(wins), parts: parseInt(parts) };
+              });
+              setLeaderboard(entries);
+            }
+            
+            // Get my stats
+            if (wallet.address) {
+              const stats = await readContract('get_stats', [wallet.address]);
+              if (stats) {
+                const [exp, wins, parts] = stats.split(',');
+                setMyStats({ exp: parseInt(exp), wins: parseInt(wins), parts: parseInt(parts) });
+              }
+            }
+
+            // Get history
+            const hist = await readContract('get_history', []);
+            if (hist) {
+              const entries = hist.split(';;').filter(Boolean).map(e => {
+                const [rid, winner, artId, time] = e.split(':');
+                return { id: rid, winner, artId: parseInt(artId), timestamp: parseInt(time) * 1000 };
+              }).reverse().slice(0, 20);
+              setGameHistory(entries);
+            }
+          } catch (e) { console.error('Poll error:', e); }
+        };
+        
+        pollData();
+        const interval = setInterval(pollData, CONFIG.POLL_INTERVAL * 2);
+        return () => clearInterval(interval);
+      }, [wallet.address]);
+
+      // ===== Poll Current Room =====
+      useEffect(() => {
+        if (!currentRoomId) return;
+        
+        const pollRoom = async () => {
+          try {
+            const roomData = await readContract('get_room', [currentRoomId]);
+            if (!roomData) return;
+            
+            const [phase, creator, artId, createTime, startTime, winner] = roomData.split(',');
+            setCurrentRoom({ 
+              id: currentRoomId, 
+              phase, 
+              creator, 
+              artId: parseInt(artId), 
+              createTime: parseInt(createTime) * 1000,
+              startTime: parseInt(startTime) * 1000,
+              winner 
+            });
+            
+            if (!roomCreateTime && createTime) {
+              setRoomCreateTime(parseInt(createTime) * 1000);
+            }
+            
+            const playersData = await readContract('get_players', [currentRoomId]);
+            if (playersData) setPlayers(playersData.split(',').filter(Boolean));
+            
+            const msgsData = await readContract('get_messages', [currentRoomId]);
+            if (msgsData) {
+              const msgs = msgsData.split(';;').filter(Boolean).map((m, i) => {
+                const [author, content, time] = m.split('|');
+                return { id: i, author, content, timestamp: parseInt(time) * 1000 };
+              });
+              setMessages(msgs);
+            }
+            
+            const votesData = await readContract('get_votes', [currentRoomId]);
+            if (votesData) {
+              const v = {};
+              votesData.split(';;').filter(Boolean).forEach(entry => {
+                const [voter, target] = entry.split(':');
+                v[voter] = target;
+              });
+              setVotes(v);
+            }
+            
+            const endVotesData = await readContract('get_end_votes', [currentRoomId]);
+            if (endVotesData) setEndVotes(endVotesData.split(',').filter(Boolean));
+            
+          } catch (e) { console.error('Room poll error:', e); }
+        };
+        
+        pollRoom();
+        const interval = setInterval(pollRoom, CONFIG.POLL_INTERVAL);
+        return () => clearInterval(interval);
+      }, [currentRoomId]);
+
+      // ===== Timer =====
+      useEffect(() => {
+        const timer = setInterval(() => {
+          if (!currentRoom || currentRoom.phase === '0' || currentRoom.phase === '3') {
+            setTimeLeft(0);
+            return;
+          }
+          const now = Date.now();
+          const elapsed = Math.floor((now - currentRoom.startTime) / 1000);
+          const remaining = CONFIG.MAX_GAME_DURATION - elapsed;
+          setTimeLeft(Math.max(0, remaining));
+        }, 1000);
+        return () => clearInterval(timer);
+      }, [currentRoom]);
+
+      // ===== AI Auto-add after 30s =====
+      useEffect(() => {
+        if (!currentRoomId || !currentRoom || currentRoom.phase !== '0' || aiAdded) return;
+        if (currentRoom.creator.toLowerCase() !== wallet.address.toLowerCase()) return;
+        if (players.length > 1) return;
+        
+        const elapsed = Date.now() - (roomCreateTime || Date.now());
+        const remaining = CONFIG.AI_FILL_DELAY * 1000 - elapsed;
+        
+        if (remaining <= 0) {
+          handleAddAI();
+        } else {
+          const timer = setTimeout(handleAddAI, remaining);
+          return () => clearTimeout(timer);
+        }
+      }, [currentRoomId, currentRoom, players, aiAdded, roomCreateTime]);
+
+      // ===== AI Auto-message =====
+      useEffect(() => {
+        if (!currentRoomId || !currentRoom || currentRoom.phase !== '1' || aiMessageSent) return;
+        if (currentRoom.creator.toLowerCase() !== wallet.address.toLowerCase()) return;
+        if (!players.some(p => isAI(p))) return;
+        
+        const timer = setTimeout(async () => {
+          try {
+            const msg = AI_DESCRIPTIONS[Math.floor(Math.random() * AI_DESCRIPTIONS.length)];
+            await writeContract(wallet.address, 'ai_send_msg', [currentRoomId, msg]);
+            setAiMessageSent(true);
+          } catch (e) { console.error('AI message error:', e); }
+        }, 3000 + Math.random() * 5000);
+        
+        return () => clearTimeout(timer);
+      }, [currentRoomId, currentRoom?.phase, players, aiMessageSent]);
+
+      // ===== AI Auto-vote =====
+      useEffect(() => {
+        if (!currentRoomId || !currentRoom || currentRoom.phase !== '2' || aiVoted) return;
+        if (currentRoom.creator.toLowerCase() !== wallet.address.toLowerCase()) return;
+        if (!players.some(p => isAI(p))) return;
+        
+        const timer = setTimeout(async () => {
+          try {
+            const humans = players.filter(p => !isAI(p));
+            if (humans.length > 0) {
+              const target = humans[Math.floor(Math.random() * humans.length)];
+              await writeContract(wallet.address, 'ai_vote', [currentRoomId, target]);
+              setAiVoted(true);
+            }
+          } catch (e) { console.error('AI vote error:', e); }
+        }, 2000 + Math.random() * 3000);
+        
+        return () => clearTimeout(timer);
+      }, [currentRoomId, currentRoom?.phase, players, aiVoted]);
+
+      // ===== Scroll chat =====
+      useEffect(() => { 
+        if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' }); 
+      }, [messages.length]);
+
+      // ===== Clear notifications =====
+      useEffect(() => {
+        if (error) setTimeout(() => setError(''), 4000);
+        if (success) setTimeout(() => setSuccess(''), 3000);
+      }, [error, success]);
+
+      // ===== Actions =====
+      const handleAddAI = async () => {
+        if (aiAdded) return;
+        try {
+          await writeContract(wallet.address, 'add_ai_player', [currentRoomId]);
+          setAiAdded(true);
+          setSuccess('AI player added!');
+        } catch (e) { console.error('Add AI error:', e); }
+      };
+
+      const handleCreateRoom = async () => {
+        if (!wallet.connected) { await connectWallet(); return; }
+        setProcessing(true);
+        try {
+          await writeContract(wallet.address, 'create_room', []);
+          setSuccess('Creating room on-chain...');
+          
+          // Wait for transaction and poll for new room
+          setTimeout(async () => {
+            const count = await readContract('get_game_count', []);
+            const newRoomId = `r${count}`;
+            setCurrentRoomId(newRoomId);
+            setRoomCreateTime(Date.now());
+            setAiAdded(false);
+            setAiMessageSent(false);
+            setAiVoted(false);
+            setActiveTab('game');
+            setSuccess('Room created: ' + newRoomId);
+          }, 3000);
+        } catch (e) { 
+          setError(e.message || 'Failed to create room'); 
+        }
+        setProcessing(false);
+      };
+
+      const handleJoinRoom = async (rid) => {
+        if (!wallet.connected) { await connectWallet(); return; }
+        setProcessing(true);
+        try {
+          await writeContract(wallet.address, 'join_room', [rid]);
+          setCurrentRoomId(rid);
+          setAiAdded(false);
+          setAiMessageSent(false);
+          setAiVoted(false);
+          setActiveTab('game');
+          setSuccess('Joined room!');
+        } catch (e) { setError(e.message || 'Failed to join'); }
+        setProcessing(false);
+      };
+
+      const handleStartGame = async () => {
+        setProcessing(true);
+        try {
+          await writeContract(wallet.address, 'start_game', [currentRoomId]);
+          setSuccess('Game started!');
+        } catch (e) { setError(e.message || 'Failed to start'); }
+        setProcessing(false);
+      };
+
+      const handleSendMessage = async () => {
+        if (!message.trim()) return;
+        setProcessing(true);
+        try {
+          await writeContract(wallet.address, 'send_msg', [currentRoomId, message.trim()]);
+          setMessage('');
+        } catch (e) { setError(e.message || 'Failed to send'); }
+        setProcessing(false);
+      };
+
+      const handleStartVoting = async () => {
+        setProcessing(true);
+        try {
+          await writeContract(wallet.address, 'start_voting', [currentRoomId]);
+          setSuccess('Voting started!');
+        } catch (e) { setError(e.message || 'Failed'); }
+        setProcessing(false);
+      };
+
+      const handleVote = async (target) => {
+        if (votes[wallet.address]) return;
+        setProcessing(true);
+        try {
+          await writeContract(wallet.address, 'vote', [currentRoomId, target]);
+          setSuccess('Voted!');
+        } catch (e) { setError(e.message || 'Failed to vote'); }
+        setProcessing(false);
+      };
+
+      const handleFinishGame = async () => {
+        setProcessing(true);
+        try {
+          await writeContract(wallet.address, 'finish_game', [currentRoomId]);
+          setSuccess('Game finished!');
+        } catch (e) { setError(e.message || 'Failed'); }
+        setProcessing(false);
+      };
+
+      const handleLeaveRoom = () => {
+        setCurrentRoomId(null);
+        setCurrentRoom(null);
+        setPlayers([]);
+        setMessages([]);
+        setVotes({});
+        setEndVotes([]);
+        setAiAdded(false);
+        setAiMessageSent(false);
+        setAiVoted(false);
+        setRoomCreateTime(null);
+        setActiveTab('lobby');
+      };
+
+      // ===== Computed values =====
+      const voteCount = useMemo(() => {
+        const counts = {};
+        Object.values(votes).forEach(target => {
+          counts[target] = (counts[target] || 0) + 1;
+        });
+        return counts;
+      }, [votes]);
+
+      const authors = useMemo(() => [...new Set(messages.map(m => m.author))], [messages]);
+      const art = currentRoom ? getArt(currentRoom.artId) : null;
+
+      // Calculate XP earned in current game
+      const getXpEarned = () => {
+        if (!currentRoom || currentRoom.phase !== '3' || !wallet.address) return null;
+        const isWinner = currentRoom.winner?.toLowerCase() === wallet.address.toLowerCase();
+        const votedCorrectly = votes[wallet.address] === currentRoom.winner;
+        
+        return {
+          winner: isWinner ? CONFIG.WINNER_EXP : 0,
+          vote: !isWinner && votedCorrectly ? CONFIG.CORRECT_VOTER_EXP : 0,
+          participate: !isWinner && !votedCorrectly ? CONFIG.PARTICIPANT_EXP : 0,
+          total: isWinner ? CONFIG.WINNER_EXP : (votedCorrectly ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP)
+        };
+      };
+
+      const myPlayerId = wallet.connected ? getPlayerId(wallet.address) : '';
+
+      return (
+        <div className="min-h-screen text-gray-200">
+          <GameRules showRules={showRules} setShowRules={setShowRules} />
+          
+          {/* Notifications */}
+          {error && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-red-500 rounded-lg animate-fade-in">{error}</div>}
+          {success && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-green-500 rounded-lg animate-fade-in">{success}</div>}
+
+          {/* Header */}
+          <header className="flex justify-between items-center px-4 md:px-6 py-4 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl btn-primary">🎨</div>
+              <div>
+                <h1 className="text-lg font-bold gradient-text">Consensus Gallery</h1>
+                <div className="flex items-center gap-2">
+                  <span className="online-badge text-[10px] px-2 py-0.5 rounded-full text-white">🌐 ONLINE</span>
+                  <span className="text-xs text-gray-500">GenLayer</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setShowRules(true)} className="text-gray-400 hover:text-white">📜</button>
+              {wallet.connected ? (
+                <div className="flex items-center gap-2 px-3 py-2 glass rounded-lg">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <div className="text-right">
+                    <div className="text-xs font-medium">{myPlayerId}</div>
+                    <div className="text-[10px] text-gray-500">{shortenAddress(wallet.address)}</div>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={connectWallet} className="btn-primary px-4 py-2 rounded-lg text-white text-sm font-medium">
+                  Connect Wallet
+                </button>
+              )}
+            </div>
+          </header>
+
+          {/* Nav */}
+          <nav className="flex justify-center gap-2 py-3 border-b border-white/5">
+            {[
+              { id: 'lobby', icon: '🏠', label: 'Lobby' },
+              { id: 'game', icon: '🎮', label: 'Game' },
+              { id: 'history', icon: '📜', label: 'History' },
+              { id: 'leaderboard', icon: '🏆', label: 'Rankings' }
+            ].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeTab === tab.id ? 'bg-white/10' : 'hover:bg-white/5'}`}>
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+          </nav>
+
+          <main className="max-w-4xl mx-auto p-4 space-y-6">
+            {/* LOBBY */}
+            {activeTab === 'lobby' && (
+              <div className="space-y-6 animate-fade-in">
+                {/* Create Game */}
+                <div className="glass rounded-2xl p-6">
+                  <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
+                  <p className="text-sm text-gray-400 mb-4">Game: {CONFIG.MAX_GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
+                  <button onClick={handleCreateRoom} disabled={processing} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white">
+                    {processing ? <><Spinner /> Processing...</> : wallet.connected ? '✨ Create Room' : '🦊 Connect & Create'}
+                  </button>
+                </div>
+
+                {/* Available Rooms */}
+                <div className="glass rounded-2xl p-6">
+                  <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({waitingRooms.length})</h3>
+                  {waitingRooms.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">No rooms available. Create one!</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {waitingRooms.map(room => (
+                        <div key={room.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl hover:bg-white/10 transition">
+                          <div className="flex items-center gap-4">
+                            <ArtDisplay artId={room.artId} size={60} />
+                            <div>
+                              <div className="font-medium">{getArt(room.artId).name}</div>
+                              <div className="text-sm text-gray-400">👥 {room.playerCount}/{CONFIG.MAX_PLAYERS} | Host: {getPlayerId(room.creator)}</div>
+                            </div>
+                          </div>
+                          <button onClick={() => handleJoinRoom(room.id)} disabled={processing} className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">
+                            {processing ? <Spinner /> : 'Join'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Stats */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="glass rounded-xl p-4 text-center">
+                    <div className="text-2xl mb-1">🎮</div>
+                    <div className="text-2xl font-bold">{totalGames}</div>
+                    <div className="text-xs text-gray-500">Total Games</div>
+                  </div>
+                  <div className="glass rounded-xl p-4 text-center">
+                    <div className="text-2xl mb-1">👥</div>
+                    <div className="text-2xl font-bold">{leaderboard.length}</div>
+                    <div className="text-xs text-gray-500">Players</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* GAME */}
+            {activeTab === 'game' && (
+              <div className="animate-fade-in">
+                {!currentRoom ? (
+                  <div className="glass rounded-2xl p-8 text-center">
+                    <p className="text-gray-400 mb-4">No active game</p>
+                    <button onClick={() => setActiveTab('lobby')} className="btn-primary px-6 py-3 rounded-xl text-white font-semibold">Go to Lobby</button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left Column */}
+                    <div className="space-y-4">
+                      {/* Status */}
+                      <div className="glass rounded-xl p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2" 
+                            style={{ background: phaseColors[currentRoom.phase] + '20', color: phaseColors[currentRoom.phase] }}>
+                            <span className="w-2 h-2 rounded-full pulse-dot" style={{ background: phaseColors[currentRoom.phase] }}></span>
+                            {phaseLabels[currentRoom.phase]}
+                          </span>
+                          {(currentRoom.phase === '1' || currentRoom.phase === '2') && (
+                            <div className={`px-3 py-1.5 rounded-lg ${timeLeft <= 30 ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}>
+                              <span className="text-xl font-bold font-mono">{formatTime(timeLeft)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Artwork */}
+                      <div className="glass rounded-xl p-6 text-center">
+                        <ArtDisplay artId={currentRoom.artId} size={300} />
+                        
+                        {/* Waiting Phase */}
+                        {currentRoom.phase === '0' && (
+                          <div className="mt-4 p-3 bg-white/5 rounded-lg">
+                            <div className="text-sm text-gray-400 mb-2">Players ({players.length}/{CONFIG.MAX_PLAYERS})</div>
+                            <div className="flex flex-wrap gap-2 justify-center">
+                              {players.map(addr => (
+                                <span key={addr} className={`px-2 py-1 rounded text-xs ${addr.toLowerCase() === wallet.address.toLowerCase() ? 'bg-primary-500/30 text-primary-300' : isAI(addr) ? 'bg-yellow-500/20 text-yellow-300' : 'bg-white/10'}`}>
+                                  {isAI(addr) && '🤖 '}{getPlayerId(addr)}{addr === currentRoom.creator && ' 👑'}
+                                </span>
+                              ))}
+                            </div>
+                            {currentRoom.creator.toLowerCase() === wallet.address.toLowerCase() && players.length >= CONFIG.MIN_PLAYERS && (
+                              <button onClick={handleStartGame} disabled={processing} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">
+                                {processing ? <Spinner /> : '🚀 Start Game'}
+                              </button>
+                            )}
+                            {players.length < CONFIG.MIN_PLAYERS && (
+                              <p className="text-sm text-yellow-500 mt-3">Waiting for players... (AI joins in {Math.max(0, Math.ceil((CONFIG.AI_FILL_DELAY * 1000 - (Date.now() - (roomCreateTime || Date.now()))) / 1000))}s)</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Finished - Results */}
+                      {currentRoom.phase === '3' && currentRoom.winner && (
+                        <div className="rounded-xl p-6 text-center" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.2))', border: '1px solid rgba(139,92,246,0.3)' }}>
+                          <div className="text-4xl mb-3">🏆</div>
+                          <h3 className="text-xl font-bold mb-2">Game Over!</h3>
+                          <p className="text-sm text-gray-400 mb-3">Winner: {getPlayerId(currentRoom.winner)}{isAI(currentRoom.winner) && ' 🤖'}</p>
+                          
+                          {/* XP Breakdown */}
+                          {getXpEarned() && (
+                            <div className="bg-white/10 rounded-lg p-3 mb-3 text-left">
+                              <div className="text-sm font-medium text-gray-300 mb-2">📊 Your XP:</div>
+                              <div className="space-y-1 text-sm">
+                                {getXpEarned().winner > 0 && <div className="flex justify-between"><span className="text-yellow-400">🏆 Won</span><span className="text-yellow-400">+{getXpEarned().winner} XP</span></div>}
+                                {getXpEarned().vote > 0 && <div className="flex justify-between"><span className="text-green-400">✓ Correct vote</span><span className="text-green-400">+{getXpEarned().vote} XP</span></div>}
+                                {getXpEarned().participate > 0 && <div className="flex justify-between"><span className="text-blue-400">👤 Participated</span><span className="text-blue-400">+{getXpEarned().participate} XP</span></div>}
+                                <div className="border-t border-white/10 pt-1 mt-1 flex justify-between font-bold"><span className="text-primary-300">Total</span><span className="text-primary-300">+{getXpEarned().total} XP</span></div>
+                              </div>
+                            </div>
+                          )}
+                          
+                          <button onClick={handleLeaveRoom} className="btn-primary mt-2 px-6 py-2 rounded-lg text-white font-semibold">Back to Lobby</button>
+                        </div>
+                      )}
+
+                      {currentRoom.phase !== '3' && (
+                        <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>
+                      )}
+                    </div>
+
+                    {/* Right Column */}
+                    <div className="space-y-4">
+                      {/* Playing - Chat */}
+                      {currentRoom.phase === '1' && (
+                        <div className="glass rounded-xl p-5">
+                          <div className="flex justify-between items-center mb-3">
+                            <h3 className="font-semibold">💬 Describe the Art</h3>
+                            <button onClick={handleStartVoting} className="text-xs text-yellow-500 hover:text-yellow-400">End Early →</button>
+                          </div>
+                          <div className="chat-scroll mb-4 space-y-2 p-2 bg-black/20 rounded-lg min-h-[200px]">
+                            {messages.length === 0 ? (
+                              <div className="text-center py-8 text-gray-500 text-sm">Start describing!</div>
+                            ) : messages.map(msg => (
+                              <div key={msg.id} className={`p-3 rounded-lg ${msg.author.toLowerCase() === wallet.address.toLowerCase() ? 'bg-primary-500/20 ml-8' : isAI(msg.author) ? 'bg-yellow-500/10 mr-8' : 'bg-white/5 mr-8'}`}>
+                                <div className="flex justify-between items-start mb-1">
+                                  <span className="text-xs font-medium text-gray-400">{isAI(msg.author) && '🤖 '}{getPlayerId(msg.author)}</span>
+                                  <span className="text-xs text-gray-500">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                                </div>
+                                <p className="text-gray-200">{msg.content}</p>
+                              </div>
+                            ))}
+                            <div ref={chatEndRef} />
+                          </div>
+                          <div className="flex gap-2">
+                            <input type="text" value={message} onChange={e => setMessage(e.target.value)} 
+                              onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
+                              placeholder="Describe the art..." 
+                              className="flex-1 px-4 py-2 rounded-lg bg-black/30 border border-white/10 text-gray-200 focus:outline-none focus:border-primary-500/50" />
+                            <button onClick={handleSendMessage} disabled={!message.trim() || processing} 
+                              className={`px-4 py-2 rounded-lg font-medium ${message.trim() ? 'btn-success text-white' : 'bg-white/10 text-gray-500'}`}>
+                              {processing ? <Spinner /> : 'Send'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Voting */}
+                      {currentRoom.phase === '2' && (
+                        <div className="glass rounded-xl p-5">
+                          <div className="flex justify-between items-center mb-3">
+                            <h3 className="font-semibold">🗳️ Vote for Best</h3>
+                            <button onClick={handleFinishGame} className="text-xs text-yellow-500 hover:text-yellow-400">Finalize →</button>
+                          </div>
+                          <div className="space-y-3">
+                            {authors.map(addr => (
+                              <div key={addr} onClick={() => handleVote(addr)} 
+                                className={`p-4 rounded-lg transition cursor-pointer ${votes[wallet.address] === addr ? 'bg-primary-500/20 border border-primary-500/40' : 'bg-white/5 border border-white/5 hover:bg-white/10'}`}>
+                                <div className="flex justify-between items-center mb-2">
+                                  <span className="text-sm font-medium">{isAI(addr) && '🤖 '}{getPlayerId(addr)}{addr.toLowerCase() === wallet.address.toLowerCase() ? ' (You)' : ''}</span>
+                                  <span className="text-yellow-500 text-sm">🗳️ {voteCount[addr] || 0}</span>
+                                </div>
+                                <div className="space-y-1">
+                                  {messages.filter(m => m.author === addr).slice(0, 2).map((m, i) => (
+                                    <p key={i} className="text-sm text-gray-300 truncate">"{m.content}"</p>
+                                  ))}
+                                </div>
+                                {votes[wallet.address] === addr && <div className="mt-2 text-sm text-primary-400">✓ Your vote</div>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Finished - Final Results */}
+                      {currentRoom.phase === '3' && (
+                        <div className="glass rounded-xl p-5">
+                          <h3 className="font-semibold mb-4">📊 Final Results</h3>
+                          <div className="space-y-2">
+                            {authors.sort((a, b) => (voteCount[b] || 0) - (voteCount[a] || 0)).map(addr => (
+                              <div key={addr} className={`p-3 rounded-lg ${addr === currentRoom.winner ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
+                                <div className="flex justify-between">
+                                  <span>{addr === currentRoom.winner && '🏆 '}{isAI(addr) && '🤖 '}{getPlayerId(addr)}</span>
+                                  <span className="text-yellow-500">{voteCount[addr] || 0} votes</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* HISTORY */}
+            {activeTab === 'history' && (
+              <div className="glass rounded-2xl p-6 animate-fade-in">
+                <h2 className="text-2xl font-bold text-center gradient-text mb-6">📜 Game History</h2>
+                {gameHistory.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500">No games played yet</div>
+                ) : (
+                  <div className="space-y-3">
+                    {gameHistory.map((game, idx) => (
+                      <div key={idx} className="p-4 rounded-xl bg-white/5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <ArtDisplay artId={game.artId} size={50} />
+                            <div>
+                              <div className="font-medium text-sm">{getArt(game.artId).name}</div>
+                              <div className="text-xs text-gray-400">Room: {game.id}</div>
+                              <div className="text-xs text-gray-500 mt-1">Winner: {getPlayerId(game.winner)}{isAI(game.winner) && ' 🤖'}</div>
+                            </div>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {new Date(game.timestamp).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* LEADERBOARD */}
+            {activeTab === 'leaderboard' && (
+              <div className="glass rounded-2xl p-6 animate-fade-in">
+                <h2 className="text-2xl font-bold text-center gradient-text-gold mb-6">🏆 Rankings</h2>
+                {leaderboard.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500">No players yet</div>
+                ) : (
+                  <div className="space-y-2">
+                    {leaderboard.map((p, idx) => (
+                      <div key={p.address} className={`grid grid-cols-[40px_1fr_80px_60px_60px] items-center p-3 rounded-lg ${idx === 0 ? 'bg-yellow-500/10' : p.address.toLowerCase() === wallet.address.toLowerCase() ? 'bg-primary-500/10' : 'bg-white/3'}`}>
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${idx < 3 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-white/10'}`}>
+                          {idx < 3 ? ['🥇', '🥈', '🥉'][idx] : idx + 1}
+                        </div>
+                        <span className="text-sm font-medium truncate">{p.playerId}{p.address.toLowerCase() === wallet.address.toLowerCase() && ' (You)'}</span>
+                        <div className="text-center"><div className="font-bold text-primary-300">{p.exp}</div><div className="text-[10px] text-gray-500">XP</div></div>
+                        <div className="text-center"><div className="font-bold text-green-400">{p.wins}</div><div className="text-[10px] text-gray-500">Wins</div></div>
+                        <div className="text-center"><div className="font-bold text-gray-300">{p.parts}</div><div className="text-[10px] text-gray-500">Games</div></div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </main>
+
+          <footer className="text-center py-6 border-t border-white/5 mt-8">
+            <p className="text-sm text-gray-500">
+              Consensus Gallery | <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a>
+              <span className="ml-2 text-xs text-green-400">🌐 Online Multiplayer</span>
+            </p>
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
