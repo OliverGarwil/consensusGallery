@@ -1,0 +1,36 @@
+{
+  "name": "consensus-gallery-blockchain",
+  "version": "1.0.0",
+  "description": "Multiplayer Art Description Game on GenLayer Blockchain",
+  "main": "public/index.html",
+  "scripts": {
+    "start": "npx serve public -l 3000",
+    "deploy": "vercel --prod",
+    "deploy:contract": "genlayer deploy --contract contracts/consensus_gallery.py",
+    "network:local": "genlayer network localnet",
+    "network:studio": "genlayer network studionet",
+    "network:testnet": "genlayer network testnet-asimov"
+  },
+  "keywords": [
+    "genlayer",
+    "blockchain",
+    "game",
+    "art",
+    "multiplayer",
+    "web3"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "serve": "^14.0.0",
+    "vercel": "^33.0.0"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  }
+}
