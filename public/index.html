@@ -60,7 +60,7 @@
       CORRECT_VOTER_EXP: 30,
       PARTICIPANT_EXP: 10,
       AI_FILL_DELAY: 30,
-      POLL_INTERVAL: 2000,
+      POLL_INTERVAL: 5000,  // 5秒轮询一次，减少请求
     };
 
     // AI player descriptions
@@ -142,6 +142,11 @@
     const writeContract = async (from, fn, args = []) => {
       if (!window.ethereum) throw new Error('Please install MetaMask!');
       
+      // 检查合约地址
+      if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
+        throw new Error('Contract not configured! Please deploy contract first.');
+      }
+      
       const callData = JSON.stringify({ function: fn, args });
       const hexData = '0x' + [...callData].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
       
@@ -154,8 +159,12 @@
       } catch (e) {
         console.error('Transaction error:', e);
         if (e.code === 4001) throw new Error('Transaction cancelled');
+        // 检测余额不足
+        if (e.message?.includes('insufficient funds') || e.message?.includes('balance')) {
+          throw new Error('Insufficient GEN balance. Please get test tokens from faucet.');
+        }
         if (e.message?.includes('Internal JSON-RPC error')) {
-          throw new Error('Transaction failed. Please check contract address and try again.');
+          throw new Error('Transaction failed. Check: 1) Contract deployed? 2) Wallet has GEN?');
         }
         throw new Error(e.message || 'Transaction failed');
       }
@@ -254,6 +263,7 @@
       const [playerIds, setPlayerIds] = useState({});
       const [totalGames, setTotalGames] = useState(0);
       const [timeLeft, setTimeLeft] = useState(0);
+      const [refreshing, setRefreshing] = useState(false);
       
       // AI state
       const [aiAdded, setAiAdded] = useState(false);
@@ -298,12 +308,20 @@
         }
       }, []);
 
-      // ===== Poll Chain Data =====
+      // ===== Poll Chain Data (只在Lobby时轮询，降低频率) =====
       useEffect(() => {
+        if (activeTab !== 'lobby' && activeTab !== 'leaderboard' && activeTab !== 'history') return;
+        
         const pollData = async () => {
+          if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') return;
+          
           try {
-            // Get waiting rooms
-            const roomsData = await readContract('get_waiting_rooms', []);
+            // 只获取最必要的数据
+            const [roomsData, count] = await Promise.all([
+              readContract('get_waiting_rooms', []),
+              readContract('get_game_count', [])
+            ]);
+            
             if (roomsData) {
               const rooms = roomsData.split(';;').filter(Boolean).map(r => {
                 const [rid, creator, artId, createTime, pcount] = r.split(':');
@@ -311,76 +329,71 @@
               });
               setWaitingRooms(rooms);
             }
-            
-            // Get total games
-            const count = await readContract('get_game_count', []);
             if (count !== null) setTotalGames(parseInt(count));
             
-            // Get leaderboard
-            const lb = await readContract('get_leaderboard', []);
-            if (lb) {
-              const entries = lb.split(';;').filter(Boolean).map(e => {
-                const [addr, pid, stats] = e.split(':');
-                const [exp, wins, parts] = (stats || '0,0,0').split(',');
-                return { address: addr, playerId: pid || generatePlayerId(addr), exp: parseInt(exp), wins: parseInt(wins), parts: parseInt(parts) };
-              });
-              setLeaderboard(entries);
-            }
-            
-            // Get my stats
-            if (wallet.address) {
-              const stats = await readContract('get_stats', [wallet.address]);
-              if (stats) {
-                const [exp, wins, parts] = stats.split(',');
-                setMyStats({ exp: parseInt(exp), wins: parseInt(wins), parts: parseInt(parts) });
+            // 排行榜和历史只在对应tab时加载
+            if (activeTab === 'leaderboard') {
+              const lb = await readContract('get_leaderboard', []);
+              if (lb) {
+                const entries = lb.split(';;').filter(Boolean).map(e => {
+                  const [addr, pid, stats] = e.split(':');
+                  const [exp, wins, parts] = (stats || '0,0,0').split(',');
+                  return { address: addr, playerId: pid || generatePlayerId(addr), exp: parseInt(exp), wins: parseInt(wins), parts: parseInt(parts) };
+                });
+                setLeaderboard(entries);
               }
             }
-
-            // Get history
-            const hist = await readContract('get_history', []);
-            if (hist) {
-              const entries = hist.split(';;').filter(Boolean).map(e => {
-                const [rid, winner, artId, time] = e.split(':');
-                return { id: rid, winner, artId: parseInt(artId), timestamp: parseInt(time) * 1000 };
-              }).reverse().slice(0, 20);
-              setGameHistory(entries);
+            
+            if (activeTab === 'history') {
+              const hist = await readContract('get_history', []);
+              if (hist) {
+                const entries = hist.split(';;').filter(Boolean).map(e => {
+                  const [rid, winner, artId, time] = e.split(':');
+                  return { id: rid, winner, artId: parseInt(artId), timestamp: parseInt(time) * 1000 };
+                }).reverse().slice(0, 20);
+                setGameHistory(entries);
+              }
             }
           } catch (e) { console.error('Poll error:', e); }
         };
         
         pollData();
-        const interval = setInterval(pollData, CONFIG.POLL_INTERVAL * 2);
+        const interval = setInterval(pollData, 15000); // 15秒轮询一次
         return () => clearInterval(interval);
-      }, [wallet.address]);
+      }, [activeTab]);
 
-      // ===== Poll Current Room =====
+      // ===== Poll Current Room (合并请求) =====
       useEffect(() => {
         if (!currentRoomId) return;
         
         const pollRoom = async () => {
           try {
-            const roomData = await readContract('get_room', [currentRoomId]);
-            if (!roomData) return;
+            // 并行获取所有房间数据
+            const [roomData, playersData, msgsData, votesData] = await Promise.all([
+              readContract('get_room', [currentRoomId]),
+              readContract('get_players', [currentRoomId]),
+              readContract('get_messages', [currentRoomId]),
+              readContract('get_votes', [currentRoomId])
+            ]);
             
-            const [phase, creator, artId, createTime, startTime, winner] = roomData.split(',');
-            setCurrentRoom({ 
-              id: currentRoomId, 
-              phase, 
-              creator, 
-              artId: parseInt(artId), 
-              createTime: parseInt(createTime) * 1000,
-              startTime: parseInt(startTime) * 1000,
-              winner 
-            });
-            
-            if (!roomCreateTime && createTime) {
-              setRoomCreateTime(parseInt(createTime) * 1000);
+            if (roomData) {
+              const [phase, creator, artId, createTime, startTime, winner] = roomData.split(',');
+              setCurrentRoom({ 
+                id: currentRoomId, 
+                phase, 
+                creator, 
+                artId: parseInt(artId), 
+                createTime: parseInt(createTime) * 1000,
+                startTime: parseInt(startTime) * 1000,
+                winner 
+              });
+              if (!roomCreateTime && createTime) {
+                setRoomCreateTime(parseInt(createTime) * 1000);
+              }
             }
             
-            const playersData = await readContract('get_players', [currentRoomId]);
             if (playersData) setPlayers(playersData.split(',').filter(Boolean));
             
-            const msgsData = await readContract('get_messages', [currentRoomId]);
             if (msgsData) {
               const msgs = msgsData.split(';;').filter(Boolean).map((m, i) => {
                 const [author, content, time] = m.split('|');
@@ -389,7 +402,6 @@
               setMessages(msgs);
             }
             
-            const votesData = await readContract('get_votes', [currentRoomId]);
             if (votesData) {
               const v = {};
               votesData.split(';;').filter(Boolean).forEach(entry => {
@@ -398,15 +410,11 @@
               });
               setVotes(v);
             }
-            
-            const endVotesData = await readContract('get_end_votes', [currentRoomId]);
-            if (endVotesData) setEndVotes(endVotesData.split(',').filter(Boolean));
-            
           } catch (e) { console.error('Room poll error:', e); }
         };
         
         pollRoom();
-        const interval = setInterval(pollRoom, CONFIG.POLL_INTERVAL);
+        const interval = setInterval(pollRoom, 8000); // 8秒轮询一次
         return () => clearInterval(interval);
       }, [currentRoomId]);
 
@@ -491,6 +499,26 @@
       }, [error, success]);
 
       // ===== Actions =====
+      const handleRefresh = async () => {
+        if (refreshing) return;
+        setRefreshing(true);
+        try {
+          const [roomsData, count] = await Promise.all([
+            readContract('get_waiting_rooms', []),
+            readContract('get_game_count', [])
+          ]);
+          if (roomsData) {
+            const rooms = roomsData.split(';;').filter(Boolean).map(r => {
+              const [rid, creator, artId, createTime, pcount] = r.split(':');
+              return { id: rid, creator, artId: parseInt(artId), createTime: parseInt(createTime), playerCount: parseInt(pcount) };
+            });
+            setWaitingRooms(rooms);
+          }
+          if (count !== null) setTotalGames(parseInt(count));
+        } catch (e) { console.error('Refresh error:', e); }
+        setRefreshing(false);
+      };
+
       const handleAddAI = async () => {
         if (aiAdded) return;
         try {
@@ -504,7 +532,7 @@
         if (!wallet.connected) { await connectWallet(); return; }
         
         if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
-          setError('Please deploy contract and update CONTRACT_ADDRESS first!');
+          setError('Contract not deployed! See instructions above.');
           return;
         }
         
@@ -512,52 +540,48 @@
         try {
           // 先获取当前游戏数量
           const countBefore = await readContract('get_game_count', []);
-          const expectedNum = countBefore ? parseInt(countBefore) + 1 : 1;
+          if (countBefore === null) {
+            setError('Cannot connect to contract. Check if contract is deployed correctly.');
+            setProcessing(false);
+            return;
+          }
+          
+          const expectedNum = parseInt(countBefore) + 1;
           const expectedRoomId = `r${expectedNum}`;
           
           // 发送创建房间交易
           await writeContract(wallet.address, 'create_room', []);
-          setSuccess('Transaction sent! Waiting for confirmation...');
+          setSuccess('Transaction sent! Waiting...');
           
-          // 等待交易确认后轮询检查新房间是否存在
+          // 简化轮询：只等待5次，每次5秒
           let attempts = 0;
           const pollNewRoom = async () => {
             attempts++;
-            try {
-              // 直接检查预期的房间ID是否存在
-              const roomData = await readContract('get_room', [expectedRoomId]);
-              if (roomData && roomData.length > 0) {
-                const [phase, creator] = roomData.split(',');
-                if (creator && creator.toLowerCase() === wallet.address.toLowerCase()) {
-                  setCurrentRoomId(expectedRoomId);
-                  setRoomCreateTime(Date.now());
-                  setAiAdded(false);
-                  setAiMessageSent(false);
-                  setAiVoted(false);
-                  setActiveTab('game');
-                  setSuccess('Room created: ' + expectedRoomId);
-                  setProcessing(false);
-                  return;
-                }
-              }
-              
-              if (attempts < 15) {
-                setTimeout(pollNewRoom, 2000);
-              } else {
-                setError('Room creation timeout. Please refresh and try again.');
+            const roomData = await readContract('get_room', [expectedRoomId]);
+            if (roomData && roomData.length > 0) {
+              const [phase, creator] = roomData.split(',');
+              if (creator && creator.toLowerCase() === wallet.address.toLowerCase()) {
+                setCurrentRoomId(expectedRoomId);
+                setRoomCreateTime(Date.now());
+                setAiAdded(false);
+                setAiMessageSent(false);
+                setAiVoted(false);
+                setActiveTab('game');
+                setSuccess('Room created: ' + expectedRoomId);
                 setProcessing(false);
+                return;
               }
-            } catch (e) {
-              console.error('Poll error:', e);
-              if (attempts < 15) {
-                setTimeout(pollNewRoom, 2000);
-              } else {
-                setProcessing(false);
-              }
+            }
+            
+            if (attempts < 5) {
+              setTimeout(pollNewRoom, 5000);
+            } else {
+              setError('Timeout - check wallet for GEN balance');
+              setProcessing(false);
             }
           };
           
-          setTimeout(pollNewRoom, 3000);
+          setTimeout(pollNewRoom, 5000);
           
         } catch (e) { 
           setError(e.message || 'Failed to create room'); 
@@ -729,7 +753,17 @@
                 {/* Contract Warning */}
                 {CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000' && (
                   <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-4 text-center">
-                    <p className="text-red-400 text-sm">⚠️ Contract not deployed! Please deploy <code className="bg-black/30 px-1 rounded">consensus_gallery_online.py</code> to GenLayer Studio and update CONTRACT_ADDRESS.</p>
+                    <p className="text-red-400 font-medium mb-2">⚠️ Contract Not Deployed!</p>
+                    <p className="text-gray-400 text-sm">1. Deploy <code className="bg-black/30 px-1 rounded">consensus_gallery_online.py</code> to GenLayer Studio</p>
+                    <p className="text-gray-400 text-sm">2. Copy contract address and update line 48 in index.html</p>
+                  </div>
+                )}
+                
+                {/* Wallet Tips */}
+                {wallet.connected && CONTRACT_ADDRESS !== '0x0000000000000000000000000000000000000000' && (
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center text-sm">
+                    <span className="text-blue-400">💡 Need GEN tokens? Get free test tokens from </span>
+                    <a href="https://studio.genlayer.com" target="_blank" className="text-blue-300 underline">GenLayer Studio Faucet</a>
                   </div>
                 )}
                 
@@ -744,7 +778,12 @@
 
                 {/* Available Rooms */}
                 <div className="glass rounded-2xl p-6">
-                  <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({waitingRooms.length})</h3>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold">🚪 Available Rooms ({waitingRooms.length})</h3>
+                    <button onClick={handleRefresh} disabled={refreshing} className="text-sm text-gray-400 hover:text-white flex items-center gap-1">
+                      {refreshing ? <Spinner /> : '🔄'} Refresh
+                    </button>
+                  </div>
                   {waitingRooms.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">No rooms available. Create one!</div>
                   ) : (
