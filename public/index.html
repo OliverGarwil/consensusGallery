@@ -142,6 +142,11 @@
     const writeContract = async (from, fn, args = []) => {
       if (!window.ethereum) throw new Error('Please install MetaMask!');
       
+      // 检查合约地址
+      if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
+        throw new Error('Contract not configured! Please deploy contract first.');
+      }
+      
       const callData = JSON.stringify({ function: fn, args });
       const hexData = '0x' + [...callData].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
       
@@ -154,8 +159,12 @@
       } catch (e) {
         console.error('Transaction error:', e);
         if (e.code === 4001) throw new Error('Transaction cancelled');
+        // 检测余额不足
+        if (e.message?.includes('insufficient funds') || e.message?.includes('balance')) {
+          throw new Error('Insufficient GEN balance. Please get test tokens from faucet.');
+        }
         if (e.message?.includes('Internal JSON-RPC error')) {
-          throw new Error('Transaction failed. Please check contract address and try again.');
+          throw new Error('Transaction failed. Check: 1) Contract deployed? 2) Wallet has GEN?');
         }
         throw new Error(e.message || 'Transaction failed');
       }
@@ -504,7 +513,7 @@
         if (!wallet.connected) { await connectWallet(); return; }
         
         if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
-          setError('Please deploy contract and update CONTRACT_ADDRESS first!');
+          setError('Contract not deployed! See instructions above.');
           return;
         }
         
@@ -512,7 +521,13 @@
         try {
           // 先获取当前游戏数量
           const countBefore = await readContract('get_game_count', []);
-          const expectedNum = countBefore ? parseInt(countBefore) + 1 : 1;
+          if (countBefore === null) {
+            setError('Cannot connect to contract. Check if contract is deployed correctly.');
+            setProcessing(false);
+            return;
+          }
+          
+          const expectedNum = parseInt(countBefore) + 1;
           const expectedRoomId = `r${expectedNum}`;
           
           // 发送创建房间交易
@@ -544,7 +559,7 @@
               if (attempts < 15) {
                 setTimeout(pollNewRoom, 2000);
               } else {
-                setError('Room creation timeout. Please refresh and try again.');
+                setError('Room creation timeout. Transaction may have failed - check your wallet for GEN balance.');
                 setProcessing(false);
               }
             } catch (e) {
@@ -729,7 +744,17 @@
                 {/* Contract Warning */}
                 {CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000' && (
                   <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-4 text-center">
-                    <p className="text-red-400 text-sm">⚠️ Contract not deployed! Please deploy <code className="bg-black/30 px-1 rounded">consensus_gallery_online.py</code> to GenLayer Studio and update CONTRACT_ADDRESS.</p>
+                    <p className="text-red-400 font-medium mb-2">⚠️ Contract Not Deployed!</p>
+                    <p className="text-gray-400 text-sm">1. Deploy <code className="bg-black/30 px-1 rounded">consensus_gallery_online.py</code> to GenLayer Studio</p>
+                    <p className="text-gray-400 text-sm">2. Copy contract address and update line 48 in index.html</p>
+                  </div>
+                )}
+                
+                {/* Wallet Tips */}
+                {wallet.connected && CONTRACT_ADDRESS !== '0x0000000000000000000000000000000000000000' && (
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center text-sm">
+                    <span className="text-blue-400">💡 Need GEN tokens? Get free test tokens from </span>
+                    <a href="https://studio.genlayer.com" target="_blank" className="text-blue-300 underline">GenLayer Studio Faucet</a>
                   </div>
                 )}
                 
