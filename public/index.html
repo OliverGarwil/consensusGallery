@@ -111,9 +111,10 @@
       const data = await res.json();
       if (data.error) {
         console.error('RPC Error:', data.error);
-        // 更友好的错误提示
+        // 静默处理某些常见错误
         if (data.error.message?.includes('Internal')) {
-          throw new Error('Contract call failed. Please check if contract is deployed correctly.');
+          console.warn('Internal RPC error - contract may not be deployed or method failed');
+          return null; // 返回null而不是抛出错误
         }
         throw new Error(data.error.message || 'RPC Error');
       }
@@ -147,11 +148,15 @@
       try {
         const txHash = await window.ethereum.request({
           method: 'eth_sendTransaction',
-          params: [{ from, to: CONTRACT_ADDRESS, data: hexData }]
+          params: [{ from, to: CONTRACT_ADDRESS, data: hexData, gas: '0x100000' }]
         });
         return txHash;
       } catch (e) {
+        console.error('Transaction error:', e);
         if (e.code === 4001) throw new Error('Transaction cancelled');
+        if (e.message?.includes('Internal JSON-RPC error')) {
+          throw new Error('Transaction failed. Please check contract address and try again.');
+        }
         throw new Error(e.message || 'Transaction failed');
       }
     };
@@ -505,45 +510,46 @@
         
         setProcessing(true);
         try {
+          // 先获取当前游戏数量
+          const countBefore = await readContract('get_game_count', []);
+          const expectedNum = countBefore ? parseInt(countBefore) + 1 : 1;
+          const expectedRoomId = `r${expectedNum}`;
+          
           // 发送创建房间交易
-          const txHash = await writeContract(wallet.address, 'create_room', []);
+          await writeContract(wallet.address, 'create_room', []);
           setSuccess('Transaction sent! Waiting for confirmation...');
           
-          // 等待交易确认后轮询
+          // 等待交易确认后轮询检查新房间是否存在
           let attempts = 0;
           const pollNewRoom = async () => {
             attempts++;
             try {
-              // 获取等待中的房间列表
-              const roomsData = await readContract('get_waiting_rooms', []);
-              if (roomsData) {
-                const rooms = roomsData.split(';;').filter(Boolean);
-                // 找到我创建的房间
-                for (const r of rooms) {
-                  const [rid, creator] = r.split(':');
-                  if (creator && creator.toLowerCase() === wallet.address.toLowerCase()) {
-                    setCurrentRoomId(rid);
-                    setRoomCreateTime(Date.now());
-                    setAiAdded(false);
-                    setAiMessageSent(false);
-                    setAiVoted(false);
-                    setActiveTab('game');
-                    setSuccess('Room created: ' + rid);
-                    setProcessing(false);
-                    return;
-                  }
+              // 直接检查预期的房间ID是否存在
+              const roomData = await readContract('get_room', [expectedRoomId]);
+              if (roomData && roomData.length > 0) {
+                const [phase, creator] = roomData.split(',');
+                if (creator && creator.toLowerCase() === wallet.address.toLowerCase()) {
+                  setCurrentRoomId(expectedRoomId);
+                  setRoomCreateTime(Date.now());
+                  setAiAdded(false);
+                  setAiMessageSent(false);
+                  setAiVoted(false);
+                  setActiveTab('game');
+                  setSuccess('Room created: ' + expectedRoomId);
+                  setProcessing(false);
+                  return;
                 }
               }
               
-              if (attempts < 20) {
+              if (attempts < 15) {
                 setTimeout(pollNewRoom, 2000);
               } else {
-                setError('Room creation timeout. Check your transaction.');
+                setError('Room creation timeout. Please refresh and try again.');
                 setProcessing(false);
               }
             } catch (e) {
               console.error('Poll error:', e);
-              if (attempts < 20) {
+              if (attempts < 15) {
                 setTimeout(pollNewRoom, 2000);
               } else {
                 setProcessing(false);
