@@ -36,22 +36,8 @@ consensus-gallery-blockchain/
 
 ### Step 1: Deploy the Smart Contract to GenLayer
 
-#### Option A: Using GenLayer CLI
 
-```bash
-# Install GenLayer CLI (correct package name is "genlayer", not "genlayer-cli")
-npm install -g genlayer
-
-# Configure network (choose one)
-genlayer network localnet      # For local development
-genlayer network studionet     # For GenLayer Studio
-genlayer network testnet-asimov # For testnet
-
-# Deploy the contract
-genlayer deploy --contract contracts/consensus_gallery.py --args "YOUR_TREASURY_ADDRESS"
-```
-
-#### Option B: Using GenLayer Studio (Recommended for beginners)
+#### Using GenLayer Studio (Recommended for beginners)
 
 This is the **easiest method** - no CLI installation required!
 
@@ -63,17 +49,6 @@ This is the **easiest method** - no CLI installation required!
 6. Enter your treasury address when prompted
 7. **Copy the deployed contract address** (you'll need this!)
 
-#### Option C: Using Local GenLayer (Advanced)
-
-```bash
-# Clone and run GenLayer Studio locally
-git clone https://github.com/genlayerlabs/genlayer-studio
-cd genlayer-studio
-npm install -g genlayer
-genlayer up
-
-# Then deploy via the local Studio UI at http://localhost:8080
-```
 
 ### Step 2: Update Contract Address
 
@@ -94,25 +69,15 @@ CURRENT_NETWORK: 'studionet' // or 'localnet' or 'testnet'
 
 ### Step 3: Deploy Frontend to Vercel
 
-#### Option A: Using Vercel CLI
 
-```bash
-# Install Vercel CLI
-npm install -g vercel
-
-# Deploy
-cd consensus-gallery-blockchain
-vercel --prod
-```
-
-#### Option B: Using Vercel Dashboard
+#### Using Vercel Dashboard
 
 1. Push your code to GitHub
 2. Go to [Vercel Dashboard](https://vercel.com)
 3. Import your GitHub repository
 4. Deploy!
 
-## 🎮 How to Play
+## How to Play
 
 1. **Connect Wallet**: Click "Connect" to link your MetaMask wallet
 2. **Create/Join Room**: Create a new game room or join an existing one
@@ -122,7 +87,7 @@ vercel --prod
 6. **Vote**: Vote for the best description when voting phase begins
 7. **Win Prizes**: Most voted player wins the prize pool!
 
-## 💰 Rewards
+## Rewards
 
 | Action | XP Reward | GEN Reward |
 |--------|-----------|------------|
@@ -130,7 +95,7 @@ vercel --prod
 | Vote for Winner | +30 XP | - |
 | Participate | +10 XP | - |
 
-## 🔧 Configuration
+## Configuration
 
 Key settings in `public/index.html`:
 
@@ -146,7 +111,7 @@ const CONFIG = {
 };
 ```
 
-## 🌐 Networks
+## Networks
 
 | Network | RPC URL | Use Case |
 |---------|---------|----------|
@@ -154,7 +119,7 @@ const CONFIG = {
 | Studionet | https://rpc.studio.genlayer.com | Testing in Studio |
 | Testnet Asimov | https://rpc.testnet-asimov.genlayer.com | Public testnet |
 
-## 📜 Smart Contract Functions
+## Smart Contract Functions
 
 ### Write Functions (require transaction)
 
@@ -180,14 +145,12 @@ const CONFIG = {
 | `get_player_stats(address)` | Get player statistics |
 | `get_contract_info()` | Get config info |
 
-## 🔒 Security Notes
+## Security Notes
 
 - Entry fees are held in the contract until game ends
-- Winners automatically receive prize (80% of pool)
-- Treasury receives remaining 20%
 - All game actions are verifiable on-chain
 
-## 🛠️ Local Development
+## Local Development
 
 ### Running GenLayer Locally
 
@@ -212,11 +175,11 @@ npx serve public
 cd public && python -m http.server 3000
 ```
 
-## 📝 License
+## License
 
 MIT License
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create your feature branch
@@ -224,7 +187,7 @@ MIT License
 4. Push to the branch
 5. Open a Pull Request
 
-## 📞 Support
+## Support
 
 - [GenLayer Documentation](https://docs.genlayer.com)
 - [GenLayer Discord](https://discord.gg/genlayer)

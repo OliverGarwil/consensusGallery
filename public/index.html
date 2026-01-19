@@ -10,6 +10,9 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
   <script>
     tailwind.config = {
       theme: { extend: { colors: { primary: { 300: '#a5b4fc', 400: '#818cf8', 500: '#667eea', 600: '#5a67d8' } } } }
@@ -23,7 +26,6 @@
     .glass { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
     .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); }
     .btn-success { background: linear-gradient(135deg, #10B981 0%, #059669 100%); }
-    .btn-warning { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%); }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     .pulse-dot { animation: pulse 2s ease-in-out infinite; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -44,35 +46,37 @@
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
     // ========== CONFIGURATION ==========
-    // 👇👇👇 部署合约后更新这个地址 👇👇👇
-    const CONTRACT_ADDRESS = '0x42301B2Cda8dCE74816db1eCC3Ca2857572cd3f4';
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyCtyllTc_t-3hlG4d3iVDBkQvTHUGKJ5WE",
+      authDomain: "gen1-8ed22.firebaseapp.com",
+      databaseURL: "https://gen1-8ed22-default-rtdb.firebaseio.com",
+      projectId: "gen1-8ed22",
+      storageBucket: "gen1-8ed22.firebasestorage.app",
+      messagingSenderId: "493981364181",
+      appId: "1:493981364181:web:1e719f5c2bf5ee8366175c",
+      measurementId: "G-ZXLD2YQK7S"
+    };
+    
+    // GenLayer contract config
+    const CONTRACT_ADDRESS = '0x40326215E4e16ADeC6785E9ceDE1D13B056A7081';
     const RPC_URL = 'https://rpc.studio.genlayer.com';
-    const CHAIN_ID = '0x' + (61999).toString(16);
     // ===================================
 
     const CONFIG = {
       MAX_PLAYERS: 5,
       MIN_PLAYERS: 2,
-      MIN_GAME_DURATION: 30,
-      MAX_GAME_DURATION: 3 * 60,
+      GAME_DURATION: 180,
       VOTE_DURATION: 30,
-      WINNER_EXP: 100,
-      CORRECT_VOTER_EXP: 30,
-      PARTICIPANT_EXP: 10,
+      WINNER_XP: 100,
+      PARTICIPATE_XP: 10,
       AI_FILL_DELAY: 30,
-      POLL_INTERVAL: 5000,  // 5秒轮询一次，减少请求
     };
 
-    // AI player descriptions
     const AI_DESCRIPTIONS = [
-      "This artwork captures profound beauty and emotion through its masterful composition.",
+      "This artwork captures profound beauty through its masterful composition.",
       "The colors blend harmoniously creating a mesmerizing visual experience.",
       "Deep symbolism emerges from every brushstroke of this masterpiece.",
-      "The composition draws the eye naturally across the canvas with perfect balance.",
       "Light and shadow play together in perfect harmony here.",
-      "This piece speaks to the human condition in subtle yet powerful ways.",
-      "A stunning display of artistic technique and creative vision.",
-      "The mood conveyed here is both haunting and beautiful.",
     ];
 
     const ART_COLLECTION = [
@@ -81,16 +85,28 @@
       { id: 3, name: 'The Great Wave', artist: 'Hokusai', year: 1831, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Tsunami_by_hokusai_19th_century.jpg/800px-Tsunami_by_hokusai_19th_century.jpg' },
       { id: 4, name: 'Girl with Pearl Earring', artist: 'Vermeer', year: 1665, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/1665_Girl_with_a_Pearl_Earring.jpg/800px-1665_Girl_with_a_Pearl_Earring.jpg' },
       { id: 5, name: 'The Scream', artist: 'Munch', year: 1893, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg/800px-Edvard_Munch%2C_1893%2C_The_Scream%2C_oil%2C_tempera_and_pastel_on_cardboard%2C_91_x_73_cm%2C_National_Gallery_of_Norway.jpg' },
-      { id: 6, name: 'Birth of Venus', artist: 'Botticelli', year: 1485, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg/800px-Sandro_Botticelli_-_La_nascita_di_Venere_-_Google_Art_Project_-_edited.jpg' },
-      { id: 7, name: 'American Gothic', artist: 'Wood', year: 1930, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg/800px-Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg' },
-      { id: 8, name: 'The Kiss', artist: 'Klimt', year: 1908, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg/800px-The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg' },
+      { id: 6, name: 'American Gothic', artist: 'Wood', year: 1930, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cc/Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg/800px-Grant_Wood_-_American_Gothic_-_Google_Art_Project.jpg' },
+      { id: 7, name: 'The Kiss', artist: 'Klimt', year: 1908, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg/800px-The_Kiss_-_Gustav_Klimt_-_Google_Cultural_Institute.jpg' },
+      { id: 8, name: 'Mona Lisa', artist: 'Da Vinci', year: 1519, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg/800px-Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg' },
+      { id: 9, name: 'The Night Watch', artist: 'Rembrandt', year: 1642, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5a/The_Night_Watch_-_HD.jpg/800px-The_Night_Watch_-_HD.jpg' },
+      { id: 10, name: 'Water Lilies', artist: 'Monet', year: 1906, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/aa/Claude_Monet_-_Water_Lilies_-_1906%2C_Ryerson.jpg/800px-Claude_Monet_-_Water_Lilies_-_1906%2C_Ryerson.jpg' },
+      { id: 11, name: 'A Sunday Afternoon', artist: 'Seurat', year: 1886, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/A_Sunday_on_La_Grande_Jatte%2C_Georges_Seurat%2C_1884.jpg/800px-A_Sunday_on_La_Grande_Jatte%2C_Georges_Seurat%2C_1884.jpg' },
+      { id: 12, name: 'The Last Supper', artist: 'Da Vinci', year: 1498, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/48/The_Last_Supper_-_Leonardo_Da_Vinci_-_High_Resolution_32x16.jpg/800px-The_Last_Supper_-_Leonardo_Da_Vinci_-_High_Resolution_32x16.jpg' },
+      { id: 13, name: 'Cafe Terrace at Night', artist: 'Van Gogh', year: 1888, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Van_Gogh_-_Terrasse_des_Caf%C3%A9s_an_der_Place_du_Forum_in_Arles_am_Abend1.jpeg/800px-Van_Gogh_-_Terrasse_des_Caf%C3%A9s_an_der_Place_du_Forum_in_Arles_am_Abend1.jpeg' },
+      { id: 14, name: 'The Son of Man', artist: 'Magritte', year: 1964, url: 'https://upload.wikimedia.org/wikipedia/en/e/ec/Magritte_TheSonOfMan.jpg' },
+      { id: 15, name: 'Impression Sunrise', artist: 'Monet', year: 1872, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/59/Monet_-_Impression%2C_Sunrise.jpg/800px-Monet_-_Impression%2C_Sunrise.jpg' },
+      { id: 16, name: 'The Sleeping Gypsy', artist: 'Rousseau', year: 1897, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7f/Henri_Rousseau_-_La_Boh%C3%A9mienne_endormie.jpg/800px-Henri_Rousseau_-_La_Boh%C3%A9mienne_endormie.jpg' },
+      { id: 17, name: 'Sunflowers', artist: 'Van Gogh', year: 1888, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Vincent_Willem_van_Gogh_127.jpg/800px-Vincent_Willem_van_Gogh_127.jpg' },
+      { id: 18, name: 'The Creation of Adam', artist: 'Michelangelo', year: 1512, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Michelangelo_-_Creation_of_Adam_%28cropped%29.jpg/800px-Michelangelo_-_Creation_of_Adam_%28cropped%29.jpg' },
+      { id: 19, name: 'Wanderer Above Sea of Fog', artist: 'Friedrich', year: 1818, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/Caspar_David_Friedrich_-_Wanderer_above_the_sea_of_fog.jpg/800px-Caspar_David_Friedrich_-_Wanderer_above_the_sea_of_fog.jpg' },
+      { id: 20, name: 'Liberty Leading People', artist: 'Delacroix', year: 1830, url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Eug%C3%A8ne_Delacroix_-_Le_28_Juillet._La_Libert%C3%A9_guidant_le_peuple.jpg/800px-Eug%C3%A8ne_Delacroix_-_Le_28_Juillet._La_Libert%C3%A9_guidant_le_peuple.jpg' },
     ];
 
+    // ========== Helpers ==========
     const getArt = (id) => ART_COLLECTION.find(a => a.id === parseInt(id)) || ART_COLLECTION[0];
     const shortenAddress = (addr) => addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '';
     const formatTime = (s) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
     const isAI = (addr) => addr && addr.startsWith('AI_');
-
     const generatePlayerId = (address) => {
       if (isAI(address)) return 'ArtBot_' + address.slice(3);
       const adjs = ['Swift', 'Brave', 'Wise', 'Noble', 'Silent', 'Golden', 'Silver', 'Cosmic', 'Mystic', 'Ancient'];
@@ -99,9 +115,23 @@
       return `${adjs[hash % 10]}${nouns[(hash * 7) % 10]}${(hash % 99) + 1}`;
     };
 
-    // ========== GenLayer RPC Helpers ==========
+    // ========== Firebase ==========
+    let db = null;
+    const initFirebase = () => {
+      if (db) return db;
+      try {
+        const app = firebase.initializeApp(FIREBASE_CONFIG);
+        db = firebase.database();
+        console.log('Firebase initialized successfully');
+        return db;
+      } catch (e) {
+        console.error('Firebase init error:', e);
+        return null;
+      }
+    };
+
+    // ========== GenLayer RPC ==========
     let rpcId = 0;
-    
     const rpcCall = async (method, params = []) => {
       const res = await fetch(RPC_URL, {
         method: 'POST',
@@ -109,71 +139,31 @@
         body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params })
       });
       const data = await res.json();
-      if (data.error) {
-        console.error('RPC Error:', data.error);
-        // 静默处理某些常见错误
-        if (data.error.message?.includes('Internal')) {
-          console.warn('Internal RPC error - contract may not be deployed or method failed');
-          return null; // 返回null而不是抛出错误
-        }
-        throw new Error(data.error.message || 'RPC Error');
-      }
+      if (data.error) return null;
       return data.result;
     };
 
     const readContract = async (fn, args = []) => {
-      if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
-        return null;
-      }
-      
+      if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') return null;
       try {
-        const result = await rpcCall('gen_call', [{ 
-          to: CONTRACT_ADDRESS, 
-          data: { function: fn, args } 
-        }]);
-        return result;
-      } catch (e) {
-        // 静默处理读取错误，避免频繁显示错误
-        console.warn(`Read ${fn} failed:`, e.message);
-        return null;
-      }
+        return await rpcCall('gen_call', [{ to: CONTRACT_ADDRESS, data: { function: fn, args } }]);
+      } catch (e) { return null; }
     };
 
     const writeContract = async (from, fn, args = []) => {
-      if (!window.ethereum) throw new Error('Please install MetaMask!');
-      
-      // 检查合约地址
-      if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
-        throw new Error('Contract not configured! Please deploy contract first.');
-      }
-      
+      if (!window.ethereum) throw new Error('MetaMask required');
       const callData = JSON.stringify({ function: fn, args });
       const hexData = '0x' + [...callData].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
-      
-      try {
-        const txHash = await window.ethereum.request({
-          method: 'eth_sendTransaction',
-          params: [{ from, to: CONTRACT_ADDRESS, data: hexData, gas: '0x100000' }]
-        });
-        return txHash;
-      } catch (e) {
-        console.error('Transaction error:', e);
-        if (e.code === 4001) throw new Error('Transaction cancelled');
-        // 检测余额不足
-        if (e.message?.includes('insufficient funds') || e.message?.includes('balance')) {
-          throw new Error('Insufficient GEN balance. Please get test tokens from faucet.');
-        }
-        if (e.message?.includes('Internal JSON-RPC error')) {
-          throw new Error('Transaction failed. Check: 1) Contract deployed? 2) Wallet has GEN?');
-        }
-        throw new Error(e.message || 'Transaction failed');
-      }
+      return await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{ from, to: CONTRACT_ADDRESS, data: hexData, gas: '0x100000' }]
+      });
     };
 
     // ========== Components ==========
-    const phaseLabels = { '0': 'Waiting', '1': 'Playing', '2': 'Voting', '3': 'Finished' };
-    const phaseColors = { '0': '#6B7280', '1': '#10B981', '2': '#F59E0B', '3': '#8B5CF6' };
     const Spinner = () => <div className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>;
+    const phaseLabels = { waiting: 'Waiting', playing: 'Playing', voting: 'Voting', finished: 'Finished' };
+    const phaseColors = { waiting: '#6B7280', playing: '#10B981', voting: '#F59E0B', finished: '#8B5CF6' };
 
     const ArtDisplay = ({ artId, size = 280 }) => {
       const art = getArt(artId);
@@ -186,13 +176,14 @@
           {size > 80 && (
             <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent rounded-b-xl">
               <div className="text-sm font-medium text-white truncate">{art.name}</div>
-              <div className="text-xs text-gray-300 truncate">{art.artist}, {art.year}</div>
+              <div className="text-xs text-gray-300">{art.artist}, {art.year}</div>
             </div>
           )}
         </div>
       );
     };
 
+    // ========== Game Rules Component ==========
     const GameRules = ({ showRules, setShowRules }) => {
       if (!showRules) return null;
       return (
@@ -208,30 +199,30 @@
                 <ol className="list-decimal list-inside space-y-1">
                   <li>Connect your MetaMask wallet</li>
                   <li>Create a new room or join an existing one</li>
-                  <li>Wait for other players (AI joins after {CONFIG.AI_FILL_DELAY}s)</li>
+                  <li>Wait for other players (AI joins after 30s)</li>
                   <li>Host starts the game when ready (min 2 players)</li>
+                  <li>Room closes automatically after 1 min if not started</li>
                 </ol>
               </div>
               <div className="p-3 bg-white/5 rounded-lg">
                 <h4 className="font-semibold text-white mb-2">🎨 Gameplay</h4>
                 <ol className="list-decimal list-inside space-y-1">
                   <li>View the artwork displayed</li>
-                  <li>Write creative descriptions ({CONFIG.MAX_GAME_DURATION / 60} minutes)</li>
-                  <li>Vote for the best description</li>
+                  <li>Write creative descriptions (3 minutes)</li>
+                  <li>Vote for the best description (30 seconds)</li>
                   <li>Most voted player wins!</li>
                 </ol>
               </div>
               <div className="p-3 bg-white/5 rounded-lg">
                 <h4 className="font-semibold text-white mb-2">⭐ XP Rewards</h4>
                 <ul className="space-y-1">
-                  <li>🏆 <span className="text-yellow-400">Win:</span> +{CONFIG.WINNER_EXP} XP</li>
-                  <li>✓ <span className="text-green-400">Correct vote:</span> +{CONFIG.CORRECT_VOTER_EXP} XP</li>
-                  <li>👤 <span className="text-blue-400">Participate:</span> +{CONFIG.PARTICIPANT_EXP} XP</li>
+                  <li>🏆 <span className="text-yellow-400">Win:</span> +100 XP</li>
+                  <li>👤 <span className="text-blue-400">Participate:</span> +10 XP</li>
                 </ul>
               </div>
               <div className="p-3 bg-green-500/10 rounded-lg border border-green-500/20">
                 <h4 className="font-semibold text-green-400 mb-2">🌐 Online Multiplayer</h4>
-                <p>All game data is stored on GenLayer blockchain. Play with anyone worldwide!</p>
+                <p>All game data synced via Firebase. Stats recorded on GenLayer blockchain!</p>
               </div>
             </div>
           </div>
@@ -248,52 +239,224 @@
       const [error, setError] = useState('');
       const [success, setSuccess] = useState('');
       const [processing, setProcessing] = useState(false);
+      const [firebaseReady, setFirebaseReady] = useState(false);
       const [showRules, setShowRules] = useState(false);
+      const [myStats, setMyStats] = useState({ exp: 0, wins: 0, games: 0 });
       
-      // On-chain data
-      const [waitingRooms, setWaitingRooms] = useState([]);
+      // Firebase realtime data
+      const [rooms, setRooms] = useState({});
       const [currentRoom, setCurrentRoom] = useState(null);
-      const [players, setPlayers] = useState([]);
-      const [messages, setMessages] = useState([]);
-      const [votes, setVotes] = useState({});
-      const [endVotes, setEndVotes] = useState([]);
       const [leaderboard, setLeaderboard] = useState([]);
       const [gameHistory, setGameHistory] = useState([]);
-      const [myStats, setMyStats] = useState({ exp: 0, wins: 0, parts: 0 });
-      const [playerIds, setPlayerIds] = useState({});
       const [totalGames, setTotalGames] = useState(0);
       const [timeLeft, setTimeLeft] = useState(0);
-      const [refreshing, setRefreshing] = useState(false);
       
-      // AI state
-      const [aiAdded, setAiAdded] = useState(false);
-      const [aiMessageSent, setAiMessageSent] = useState(false);
-      const [aiVoted, setAiVoted] = useState(false);
-      const [roomCreateTime, setRoomCreateTime] = useState(null);
-
       const chatEndRef = useRef(null);
+      const getPlayerId = useCallback((addr) => generatePlayerId(addr), []);
 
-      // Get or generate player ID
-      const getPlayerId = useCallback((addr) => {
-        if (!addr) return '';
-        if (playerIds[addr]) return playerIds[addr];
-        const pid = generatePlayerId(addr);
-        setPlayerIds(prev => ({ ...prev, [addr]: pid }));
-        return pid;
-      }, [playerIds]);
+      // ===== Initialize Firebase =====
+      useEffect(() => {
+        const db = initFirebase();
+        if (db) {
+          setFirebaseReady(true);
+          
+          // Listen to rooms list
+          db.ref('rooms').on('value', (snapshot) => {
+            const data = snapshot.val() || {};
+            setRooms(data);
+            // Count total games
+            const finished = Object.values(data).filter(r => r.phase === 'finished').length;
+            setTotalGames(finished);
+          });
+          
+          // Listen to leaderboard
+          db.ref('leaderboard').orderByChild('exp').limitToLast(20).on('value', (snapshot) => {
+            const data = snapshot.val() || {};
+            const list = Object.entries(data).map(([addr, stats]) => ({
+              address: addr,
+              playerId: stats.playerId || generatePlayerId(addr),
+              exp: stats.exp || 0,
+              wins: stats.wins || 0,
+              games: stats.games || 0
+            })).sort((a, b) => b.exp - a.exp);
+            setLeaderboard(list);
+          });
+          
+          // Listen to history
+          db.ref('history').orderByChild('timestamp').limitToLast(20).on('value', (snapshot) => {
+            const data = snapshot.val() || {};
+            const list = Object.values(data).sort((a, b) => b.timestamp - a.timestamp);
+            setGameHistory(list);
+          });
+        }
+        
+        return () => {
+          if (db) {
+            db.ref('rooms').off();
+            db.ref('leaderboard').off();
+            db.ref('history').off();
+          }
+        };
+      }, []);
 
-      // ===== Wallet Connection =====
+      // ===== Watch current room =====
+      useEffect(() => {
+        if (!currentRoomId || !firebaseReady) return;
+        const db = firebase.database();
+        const roomRef = db.ref(`rooms/${currentRoomId}`);
+        
+        const unsubscribe = roomRef.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+            setCurrentRoom({ id: currentRoomId, ...data });
+          } else {
+            setCurrentRoom(null);
+          }
+        });
+        
+        return () => roomRef.off('value', unsubscribe);
+      }, [currentRoomId, firebaseReady]);
+
+      // ===== Watch my stats =====
+      useEffect(() => {
+        if (!wallet.address || !firebaseReady) return;
+        const db = firebase.database();
+        const ref = db.ref(`leaderboard/${wallet.address}`);
+        
+        ref.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+            setMyStats({ exp: data.exp || 0, wins: data.wins || 0, games: data.games || 0 });
+          }
+        });
+        
+        return () => ref.off();
+      }, [wallet.address, firebaseReady]);
+
+      // ===== Timer =====
+      useEffect(() => {
+        if (!currentRoom || !['playing', 'voting'].includes(currentRoom.phase)) {
+          setTimeLeft(0);
+          return;
+        }
+        
+        const timer = setInterval(() => {
+          const now = Date.now();
+          const startTime = currentRoom.phase === 'playing' ? currentRoom.startTime : currentRoom.voteStartTime;
+          const duration = currentRoom.phase === 'playing' ? CONFIG.GAME_DURATION : CONFIG.VOTE_DURATION;
+          const elapsed = Math.floor((now - startTime) / 1000);
+          const remaining = duration - elapsed;
+          setTimeLeft(Math.max(0, remaining));
+          
+          // Auto phase transition
+          if (remaining <= 0 && currentRoom.creator === wallet.address) {
+            if (currentRoom.phase === 'playing') {
+              handleStartVoting();
+            } else if (currentRoom.phase === 'voting') {
+              handleFinishGame();
+            }
+          }
+        }, 1000);
+        
+        return () => clearInterval(timer);
+      }, [currentRoom, wallet.address]);
+
+      // ===== Check end votes (more than half = skip to voting) =====
+      useEffect(() => {
+        if (!currentRoom || currentRoom.phase !== 'playing') return;
+        if (currentRoom.creator !== wallet.address) return;
+        
+        const players = Object.keys(currentRoom.players || {});
+        const endVotes = Object.keys(currentRoom.endVotes || {});
+        const humanPlayers = players.filter(p => !p.startsWith('AI_'));
+        
+        // Need more than half to vote end
+        if (endVotes.length > humanPlayers.length / 2) {
+          handleStartVoting();
+        }
+      }, [currentRoom?.endVotes, currentRoom?.phase, wallet.address]);
+
+      // ===== AI auto-join =====
+      useEffect(() => {
+        if (!currentRoom || currentRoom.phase !== 'waiting') return;
+        if (currentRoom.creator !== wallet.address) return;
+        if (Object.keys(currentRoom.players || {}).length > 1) return;
+        if (currentRoom.players && Object.keys(currentRoom.players).some(k => k.startsWith('AI_'))) return;
+        
+        const elapsed = Date.now() - currentRoom.createTime;
+        const remaining = CONFIG.AI_FILL_DELAY * 1000 - elapsed;
+        
+        if (remaining <= 0) {
+          handleAddAI();
+        } else {
+          const timer = setTimeout(handleAddAI, remaining);
+          return () => clearTimeout(timer);
+        }
+      }, [currentRoom, wallet.address]);
+
+      // ===== AI auto-message =====
+      useEffect(() => {
+        if (!currentRoom || currentRoom.phase !== 'playing') return;
+        if (currentRoom.creator !== wallet.address) return;
+        const players = Object.keys(currentRoom.players || {});
+        const aiPlayer = players.find(p => p.startsWith('AI_'));
+        if (!aiPlayer) return;
+        const msgs = currentRoom.messages || {};
+        if (Object.values(msgs).some(m => m.author === aiPlayer)) return;
+        
+        const timer = setTimeout(async () => {
+          const db = firebase.database();
+          const msg = AI_DESCRIPTIONS[Math.floor(Math.random() * AI_DESCRIPTIONS.length)];
+          await db.ref(`rooms/${currentRoomId}/messages`).push({
+            author: aiPlayer,
+            content: msg,
+            timestamp: Date.now()
+          });
+        }, 3000 + Math.random() * 5000);
+        
+        return () => clearTimeout(timer);
+      }, [currentRoom?.phase, currentRoom?.messages, wallet.address]);
+
+      // ===== AI auto-vote =====
+      useEffect(() => {
+        if (!currentRoom || currentRoom.phase !== 'voting') return;
+        if (currentRoom.creator !== wallet.address) return;
+        const players = Object.keys(currentRoom.players || {});
+        const aiPlayer = players.find(p => p.startsWith('AI_'));
+        if (!aiPlayer) return;
+        const votes = currentRoom.votes || {};
+        if (votes[aiPlayer]) return;
+        
+        const timer = setTimeout(async () => {
+          const db = firebase.database();
+          const humans = players.filter(p => !p.startsWith('AI_'));
+          if (humans.length > 0) {
+            const target = humans[Math.floor(Math.random() * humans.length)];
+            await db.ref(`rooms/${currentRoomId}/votes/${aiPlayer}`).set(target);
+          }
+        }, 2000 + Math.random() * 3000);
+        
+        return () => clearTimeout(timer);
+      }, [currentRoom?.phase, currentRoom?.votes, wallet.address]);
+
+      // ===== Scroll chat =====
+      useEffect(() => {
+        if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }, [currentRoom?.messages]);
+
+      // ===== Notifications =====
+      useEffect(() => {
+        if (error) setTimeout(() => setError(''), 4000);
+        if (success) setTimeout(() => setSuccess(''), 3000);
+      }, [error, success]);
+
+      // ===== Wallet =====
       const connectWallet = async () => {
         if (!window.ethereum) { setError('Please install MetaMask!'); return; }
-        setProcessing(true);
         try {
           const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-          if (accounts[0]) {
-            setWallet({ connected: true, address: accounts[0] });
-            setSuccess('Wallet Connected!');
-          }
+          if (accounts[0]) setWallet({ connected: true, address: accounts[0] });
         } catch (e) { setError('Connection failed'); }
-        setProcessing(false);
       };
 
       useEffect(() => {
@@ -308,393 +471,268 @@
         }
       }, []);
 
-      // ===== Poll Chain Data (只在Lobby时轮询，降低频率) =====
-      useEffect(() => {
-        if (activeTab !== 'lobby' && activeTab !== 'leaderboard' && activeTab !== 'history') return;
-        
-        const pollData = async () => {
-          if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') return;
-          
-          try {
-            // 只获取最必要的数据
-            const [roomsData, count] = await Promise.all([
-              readContract('get_waiting_rooms', []),
-              readContract('get_game_count', [])
-            ]);
-            
-            if (roomsData) {
-              const rooms = roomsData.split(';;').filter(Boolean).map(r => {
-                const [rid, creator, artId, createTime, pcount] = r.split(':');
-                return { id: rid, creator, artId: parseInt(artId), createTime: parseInt(createTime), playerCount: parseInt(pcount) };
-              });
-              setWaitingRooms(rooms);
-            }
-            if (count !== null) setTotalGames(parseInt(count));
-            
-            // 排行榜和历史只在对应tab时加载
-            if (activeTab === 'leaderboard') {
-              const lb = await readContract('get_leaderboard', []);
-              if (lb) {
-                const entries = lb.split(';;').filter(Boolean).map(e => {
-                  const [addr, pid, stats] = e.split(':');
-                  const [exp, wins, parts] = (stats || '0,0,0').split(',');
-                  return { address: addr, playerId: pid || generatePlayerId(addr), exp: parseInt(exp), wins: parseInt(wins), parts: parseInt(parts) };
-                });
-                setLeaderboard(entries);
-              }
-            }
-            
-            if (activeTab === 'history') {
-              const hist = await readContract('get_history', []);
-              if (hist) {
-                const entries = hist.split(';;').filter(Boolean).map(e => {
-                  const [rid, winner, artId, time] = e.split(':');
-                  return { id: rid, winner, artId: parseInt(artId), timestamp: parseInt(time) * 1000 };
-                }).reverse().slice(0, 20);
-                setGameHistory(entries);
-              }
-            }
-          } catch (e) { console.error('Poll error:', e); }
-        };
-        
-        pollData();
-        const interval = setInterval(pollData, 15000); // 15秒轮询一次
-        return () => clearInterval(interval);
-      }, [activeTab]);
-
-      // ===== Poll Current Room (合并请求) =====
-      useEffect(() => {
-        if (!currentRoomId) return;
-        
-        const pollRoom = async () => {
-          try {
-            // 并行获取所有房间数据
-            const [roomData, playersData, msgsData, votesData] = await Promise.all([
-              readContract('get_room', [currentRoomId]),
-              readContract('get_players', [currentRoomId]),
-              readContract('get_messages', [currentRoomId]),
-              readContract('get_votes', [currentRoomId])
-            ]);
-            
-            if (roomData) {
-              const [phase, creator, artId, createTime, startTime, winner] = roomData.split(',');
-              setCurrentRoom({ 
-                id: currentRoomId, 
-                phase, 
-                creator, 
-                artId: parseInt(artId), 
-                createTime: parseInt(createTime) * 1000,
-                startTime: parseInt(startTime) * 1000,
-                winner 
-              });
-              if (!roomCreateTime && createTime) {
-                setRoomCreateTime(parseInt(createTime) * 1000);
-              }
-            }
-            
-            if (playersData) setPlayers(playersData.split(',').filter(Boolean));
-            
-            if (msgsData) {
-              const msgs = msgsData.split(';;').filter(Boolean).map((m, i) => {
-                const [author, content, time] = m.split('|');
-                return { id: i, author, content, timestamp: parseInt(time) * 1000 };
-              });
-              setMessages(msgs);
-            }
-            
-            if (votesData) {
-              const v = {};
-              votesData.split(';;').filter(Boolean).forEach(entry => {
-                const [voter, target] = entry.split(':');
-                v[voter] = target;
-              });
-              setVotes(v);
-            }
-          } catch (e) { console.error('Room poll error:', e); }
-        };
-        
-        pollRoom();
-        const interval = setInterval(pollRoom, 8000); // 8秒轮询一次
-        return () => clearInterval(interval);
-      }, [currentRoomId]);
-
-      // ===== Timer =====
-      useEffect(() => {
-        const timer = setInterval(() => {
-          if (!currentRoom || currentRoom.phase === '0' || currentRoom.phase === '3') {
-            setTimeLeft(0);
-            return;
-          }
-          const now = Date.now();
-          const elapsed = Math.floor((now - currentRoom.startTime) / 1000);
-          const remaining = CONFIG.MAX_GAME_DURATION - elapsed;
-          setTimeLeft(Math.max(0, remaining));
-        }, 1000);
-        return () => clearInterval(timer);
-      }, [currentRoom]);
-
-      // ===== AI Auto-add after 30s =====
-      useEffect(() => {
-        if (!currentRoomId || !currentRoom || currentRoom.phase !== '0' || aiAdded) return;
-        if (currentRoom.creator.toLowerCase() !== wallet.address.toLowerCase()) return;
-        if (players.length > 1) return;
-        
-        const elapsed = Date.now() - (roomCreateTime || Date.now());
-        const remaining = CONFIG.AI_FILL_DELAY * 1000 - elapsed;
-        
-        if (remaining <= 0) {
-          handleAddAI();
-        } else {
-          const timer = setTimeout(handleAddAI, remaining);
-          return () => clearTimeout(timer);
-        }
-      }, [currentRoomId, currentRoom, players, aiAdded, roomCreateTime]);
-
-      // ===== AI Auto-message =====
-      useEffect(() => {
-        if (!currentRoomId || !currentRoom || currentRoom.phase !== '1' || aiMessageSent) return;
-        if (currentRoom.creator.toLowerCase() !== wallet.address.toLowerCase()) return;
-        if (!players.some(p => isAI(p))) return;
-        
-        const timer = setTimeout(async () => {
-          try {
-            const msg = AI_DESCRIPTIONS[Math.floor(Math.random() * AI_DESCRIPTIONS.length)];
-            await writeContract(wallet.address, 'ai_send_msg', [currentRoomId, msg]);
-            setAiMessageSent(true);
-          } catch (e) { console.error('AI message error:', e); }
-        }, 3000 + Math.random() * 5000);
-        
-        return () => clearTimeout(timer);
-      }, [currentRoomId, currentRoom?.phase, players, aiMessageSent]);
-
-      // ===== AI Auto-vote =====
-      useEffect(() => {
-        if (!currentRoomId || !currentRoom || currentRoom.phase !== '2' || aiVoted) return;
-        if (currentRoom.creator.toLowerCase() !== wallet.address.toLowerCase()) return;
-        if (!players.some(p => isAI(p))) return;
-        
-        const timer = setTimeout(async () => {
-          try {
-            const humans = players.filter(p => !isAI(p));
-            if (humans.length > 0) {
-              const target = humans[Math.floor(Math.random() * humans.length)];
-              await writeContract(wallet.address, 'ai_vote', [currentRoomId, target]);
-              setAiVoted(true);
-            }
-          } catch (e) { console.error('AI vote error:', e); }
-        }, 2000 + Math.random() * 3000);
-        
-        return () => clearTimeout(timer);
-      }, [currentRoomId, currentRoom?.phase, players, aiVoted]);
-
-      // ===== Scroll chat =====
-      useEffect(() => { 
-        if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' }); 
-      }, [messages.length]);
-
-      // ===== Clear notifications =====
-      useEffect(() => {
-        if (error) setTimeout(() => setError(''), 4000);
-        if (success) setTimeout(() => setSuccess(''), 3000);
-      }, [error, success]);
-
       // ===== Actions =====
-      const handleRefresh = async () => {
-        if (refreshing) return;
-        setRefreshing(true);
-        try {
-          const [roomsData, count] = await Promise.all([
-            readContract('get_waiting_rooms', []),
-            readContract('get_game_count', [])
-          ]);
-          if (roomsData) {
-            const rooms = roomsData.split(';;').filter(Boolean).map(r => {
-              const [rid, creator, artId, createTime, pcount] = r.split(':');
-              return { id: rid, creator, artId: parseInt(artId), createTime: parseInt(createTime), playerCount: parseInt(pcount) };
-            });
-            setWaitingRooms(rooms);
-          }
-          if (count !== null) setTotalGames(parseInt(count));
-        } catch (e) { console.error('Refresh error:', e); }
-        setRefreshing(false);
-      };
-
       const handleAddAI = async () => {
-        if (aiAdded) return;
-        try {
-          await writeContract(wallet.address, 'add_ai_player', [currentRoomId]);
-          setAiAdded(true);
-          setSuccess('AI player added!');
-        } catch (e) { console.error('Add AI error:', e); }
+        if (!firebaseReady || !currentRoomId) return;
+        const db = firebase.database();
+        const aiId = 'AI_' + currentRoomId;
+        await db.ref(`rooms/${currentRoomId}/players/${aiId}`).set({
+          joinTime: Date.now(),
+          playerId: 'ArtBot_' + currentRoomId
+        });
       };
 
       const handleCreateRoom = async () => {
         if (!wallet.connected) { await connectWallet(); return; }
-        
-        if (CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000') {
-          setError('Contract not deployed! See instructions above.');
-          return;
-        }
+        if (!firebaseReady) { setError('Firebase not configured!'); return; }
         
         setProcessing(true);
         try {
-          // 先获取当前游戏数量
-          const countBefore = await readContract('get_game_count', []);
-          if (countBefore === null) {
-            setError('Cannot connect to contract. Check if contract is deployed correctly.');
-            setProcessing(false);
-            return;
-          }
+          // Call contract first (create blockchain transaction)
+          const db = firebase.database();
+          const roomRef = db.ref('rooms').push();
+          const roomId = roomRef.key;
           
-          const expectedNum = parseInt(countBefore) + 1;
-          const expectedRoomId = `r${expectedNum}`;
+          await writeContract(wallet.address, 'join_game', [roomId]);
           
-          // 发送创建房间交易
-          await writeContract(wallet.address, 'create_room', []);
-          setSuccess('Transaction sent! Waiting...');
+          const artId = Math.floor(Math.random() * ART_COLLECTION.length) + 1;
           
-          // 简化轮询：只等待5次，每次5秒
-          let attempts = 0;
-          const pollNewRoom = async () => {
-            attempts++;
-            const roomData = await readContract('get_room', [expectedRoomId]);
-            if (roomData && roomData.length > 0) {
-              const [phase, creator] = roomData.split(',');
-              if (creator && creator.toLowerCase() === wallet.address.toLowerCase()) {
-                setCurrentRoomId(expectedRoomId);
-                setRoomCreateTime(Date.now());
-                setAiAdded(false);
-                setAiMessageSent(false);
-                setAiVoted(false);
-                setActiveTab('game');
-                setSuccess('Room created: ' + expectedRoomId);
-                setProcessing(false);
-                return;
+          await roomRef.set({
+            phase: 'waiting',
+            creator: wallet.address,
+            artId,
+            createTime: Date.now(),
+            players: {
+              [wallet.address]: {
+                joinTime: Date.now(),
+                playerId: getPlayerId(wallet.address)
               }
             }
-            
-            if (attempts < 5) {
-              setTimeout(pollNewRoom, 5000);
-            } else {
-              setError('Timeout - check wallet for GEN balance');
-              setProcessing(false);
-            }
-          };
+          });
           
-          setTimeout(pollNewRoom, 5000);
-          
-        } catch (e) { 
-          setError(e.message || 'Failed to create room'); 
-          setProcessing(false);
+          setCurrentRoomId(roomId);
+          setActiveTab('game');
+          setSuccess('Room created!');
+        } catch (e) {
+          setError(e.message || 'Failed to create room');
         }
+        setProcessing(false);
       };
 
-      const handleJoinRoom = async (rid) => {
+      const handleJoinRoom = async (roomId) => {
         if (!wallet.connected) { await connectWallet(); return; }
+        if (!firebaseReady) return;
+        
         setProcessing(true);
         try {
-          await writeContract(wallet.address, 'join_room', [rid]);
-          setCurrentRoomId(rid);
-          setAiAdded(false);
-          setAiMessageSent(false);
-          setAiVoted(false);
+          // Call contract first (create blockchain transaction)
+          await writeContract(wallet.address, 'join_game', [roomId]);
+          
+          const db = firebase.database();
+          await db.ref(`rooms/${roomId}/players/${wallet.address}`).set({
+            joinTime: Date.now(),
+            playerId: getPlayerId(wallet.address)
+          });
+          setCurrentRoomId(roomId);
           setActiveTab('game');
           setSuccess('Joined room!');
-        } catch (e) { setError(e.message || 'Failed to join'); }
+        } catch (e) {
+          setError(e.message || 'Failed to join');
+        }
         setProcessing(false);
       };
 
       const handleStartGame = async () => {
+        if (!currentRoomId || !firebaseReady) return;
         setProcessing(true);
         try {
-          await writeContract(wallet.address, 'start_game', [currentRoomId]);
+          const db = firebase.database();
+          await db.ref(`rooms/${currentRoomId}`).update({
+            phase: 'playing',
+            startTime: Date.now()
+          });
           setSuccess('Game started!');
-        } catch (e) { setError(e.message || 'Failed to start'); }
+        } catch (e) { setError('Failed to start'); }
         setProcessing(false);
       };
 
       const handleSendMessage = async () => {
-        if (!message.trim()) return;
+        if (!message.trim() || !currentRoomId || !firebaseReady) return;
         setProcessing(true);
         try {
-          await writeContract(wallet.address, 'send_msg', [currentRoomId, message.trim()]);
+          const db = firebase.database();
+          await db.ref(`rooms/${currentRoomId}/messages`).push({
+            author: wallet.address,
+            content: message.trim(),
+            timestamp: Date.now()
+          });
           setMessage('');
-        } catch (e) { setError(e.message || 'Failed to send'); }
+        } catch (e) { setError('Failed to send'); }
         setProcessing(false);
       };
 
       const handleStartVoting = async () => {
+        if (!currentRoomId || !firebaseReady) return;
         setProcessing(true);
         try {
-          await writeContract(wallet.address, 'start_voting', [currentRoomId]);
-          setSuccess('Voting started!');
-        } catch (e) { setError(e.message || 'Failed'); }
+          const db = firebase.database();
+          await db.ref(`rooms/${currentRoomId}`).update({
+            phase: 'voting',
+            voteStartTime: Date.now()
+          });
+        } catch (e) { setError('Failed'); }
+        setProcessing(false);
+      };
+
+      // Vote to end game early (available after 1 minute)
+      const handleVoteEnd = async () => {
+        if (!currentRoomId || !firebaseReady || !wallet.address) return;
+        setProcessing(true);
+        try {
+          const db = firebase.database();
+          await db.ref(`rooms/${currentRoomId}/endVotes/${wallet.address}`).set(true);
+          setSuccess('Voted to end!');
+        } catch (e) { setError('Failed'); }
         setProcessing(false);
       };
 
       const handleVote = async (target) => {
-        if (votes[wallet.address]) return;
+        if (!currentRoomId || !firebaseReady) return;
+        if (currentRoom?.votes?.[wallet.address]) return;
         setProcessing(true);
         try {
-          await writeContract(wallet.address, 'vote', [currentRoomId, target]);
+          const db = firebase.database();
+          await db.ref(`rooms/${currentRoomId}/votes/${wallet.address}`).set(target);
           setSuccess('Voted!');
-        } catch (e) { setError(e.message || 'Failed to vote'); }
+        } catch (e) { setError('Failed to vote'); }
         setProcessing(false);
       };
 
       const handleFinishGame = async () => {
+        if (!currentRoomId || !firebaseReady || !currentRoom) return;
         setProcessing(true);
         try {
-          await writeContract(wallet.address, 'finish_game', [currentRoomId]);
-          setSuccess('Game finished!');
-        } catch (e) { setError(e.message || 'Failed'); }
+          const db = firebase.database();
+          const votes = currentRoom.votes || {};
+          
+          // Calculate winner (check for tie)
+          const counts = {};
+          Object.values(votes).forEach(target => {
+            counts[target] = (counts[target] || 0) + 1;
+          });
+          
+          let winner = '';
+          let maxVotes = 0;
+          let isTie = false;
+          
+          for (const [addr, cnt] of Object.entries(counts)) {
+            if (cnt > maxVotes) {
+              maxVotes = cnt;
+              winner = addr;
+              isTie = false;
+            } else if (cnt === maxVotes && maxVotes > 0) {
+              isTie = true; // Tie detected
+            }
+          }
+          
+          // If tie, no winner
+          if (isTie) {
+            winner = '';
+          }
+          
+          // Update room state
+          await db.ref(`rooms/${currentRoomId}`).update({
+            phase: 'finished',
+            winner,
+            isTie,
+            finishTime: Date.now()
+          });
+          
+          // Update leaderboard
+          const players = Object.keys(currentRoom.players || {});
+          const participantsXp = {}; // Track XP earned by each participant
+          
+          for (const addr of players) {
+            if (addr.startsWith('AI_')) continue;
+            const ref = db.ref(`leaderboard/${addr}`);
+            const snapshot = await ref.once('value');
+            const current = snapshot.val() || { exp: 0, wins: 0, games: 0 };
+            
+            const isWinner = !isTie && addr === winner;
+            const xpGained = isWinner ? CONFIG.WINNER_XP : CONFIG.PARTICIPATE_XP;
+            participantsXp[addr] = { xp: xpGained, isWinner, playerId: getPlayerId(addr) };
+            
+            await ref.update({
+              exp: current.exp + xpGained,
+              wins: current.wins + (isWinner ? 1 : 0),
+              games: current.games + 1,
+              playerId: getPlayerId(addr)
+            });
+          }
+          
+          // Add to history (with participant XP info)
+          await db.ref('history').push({
+            roomId: currentRoomId,
+            winner,
+            winnerName: winner ? getPlayerId(winner) : 'Tie',
+            isTie,
+            artId: currentRoom.artId,
+            timestamp: Date.now(),
+            playerCount: players.length,
+            participants: participantsXp
+          });
+          
+          setSuccess(isTie ? 'Game ended in a tie!' : 'Game finished!');
+        } catch (e) { setError('Failed to finish'); }
         setProcessing(false);
       };
 
       const handleLeaveRoom = () => {
         setCurrentRoomId(null);
         setCurrentRoom(null);
-        setPlayers([]);
-        setMessages([]);
-        setVotes({});
-        setEndVotes([]);
-        setAiAdded(false);
-        setAiMessageSent(false);
-        setAiVoted(false);
-        setRoomCreateTime(null);
         setActiveTab('lobby');
       };
 
-      // ===== Computed values =====
+      // ===== Computed =====
+      const waitingRooms = useMemo(() => {
+        const now = Date.now();
+        return Object.entries(rooms)
+          .filter(([_, r]) => {
+            // Must be waiting phase
+            if (r.phase !== 'waiting') return false;
+            // Must be created within 1 minute
+            if ((now - r.createTime) >= 60000) return false;
+            // Creator must be valid address (starts with 0x, 42 chars)
+            if (!r.creator || !r.creator.startsWith('0x') || r.creator.length !== 42) return false;
+            // Must have players
+            if (!r.players || Object.keys(r.players).length === 0) return false;
+            return true;
+          })
+          .map(([id, r]) => ({ id, ...r, playerCount: Object.keys(r.players || {}).length }));
+      }, [rooms]);
+
       const voteCount = useMemo(() => {
         const counts = {};
-        Object.values(votes).forEach(target => {
+        Object.values(currentRoom?.votes || {}).forEach(target => {
           counts[target] = (counts[target] || 0) + 1;
         });
         return counts;
-      }, [votes]);
+      }, [currentRoom?.votes]);
+
+      const messages = useMemo(() => {
+        return Object.entries(currentRoom?.messages || {})
+          .map(([id, m]) => ({ id, ...m }))
+          .sort((a, b) => a.timestamp - b.timestamp);
+      }, [currentRoom?.messages]);
 
       const authors = useMemo(() => [...new Set(messages.map(m => m.author))], [messages]);
-      const art = currentRoom ? getArt(currentRoom.artId) : null;
-
-      // Calculate XP earned in current game
-      const getXpEarned = () => {
-        if (!currentRoom || currentRoom.phase !== '3' || !wallet.address) return null;
-        const isWinner = currentRoom.winner?.toLowerCase() === wallet.address.toLowerCase();
-        const votedCorrectly = votes[wallet.address] === currentRoom.winner;
-        
-        return {
-          winner: isWinner ? CONFIG.WINNER_EXP : 0,
-          vote: !isWinner && votedCorrectly ? CONFIG.CORRECT_VOTER_EXP : 0,
-          participate: !isWinner && !votedCorrectly ? CONFIG.PARTICIPANT_EXP : 0,
-          total: isWinner ? CONFIG.WINNER_EXP : (votedCorrectly ? CONFIG.CORRECT_VOTER_EXP : CONFIG.PARTICIPANT_EXP)
-        };
-      };
-
+      const players = Object.keys(currentRoom?.players || {});
       const myPlayerId = wallet.connected ? getPlayerId(wallet.address) : '';
+      const configMissing = !FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === "YOUR_API_KEY";
 
       return (
         <div className="min-h-screen text-gray-200">
+          {/* Game Rules Modal */}
           <GameRules showRules={showRules} setShowRules={setShowRules} />
           
           {/* Notifications */}
@@ -708,19 +746,25 @@
               <div>
                 <h1 className="text-lg font-bold gradient-text">Consensus Gallery</h1>
                 <div className="flex items-center gap-2">
-                  <span className="online-badge text-[10px] px-2 py-0.5 rounded-full text-white">🌐 ONLINE</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full text-white ${firebaseReady ? 'online-badge' : 'bg-gray-500'}`}>
+                    {firebaseReady ? '🌐 ONLINE' : '⚠️ OFFLINE'}
+                  </span>
                   <span className="text-xs text-gray-500">GenLayer</span>
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <button onClick={() => setShowRules(true)} className="text-gray-400 hover:text-white">📜</button>
+              <button onClick={() => setShowRules(true)} className="text-gray-400 hover:text-white text-xl">📜</button>
               {wallet.connected ? (
                 <div className="flex items-center gap-2 px-3 py-2 glass rounded-lg">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                   <div className="text-right">
                     <div className="text-xs font-medium">{myPlayerId}</div>
                     <div className="text-[10px] text-gray-500">{shortenAddress(wallet.address)}</div>
+                  </div>
+                  <div className="ml-2 pl-2 border-l border-white/10 text-right">
+                    <div className="text-xs font-bold text-primary-300">{myStats.exp} XP</div>
+                    <div className="text-[10px] text-gray-500">{myStats.wins} wins</div>
                   </div>
                 </div>
               ) : (
@@ -747,43 +791,30 @@
           </nav>
 
           <main className="max-w-4xl mx-auto p-4 space-y-6">
+            {/* Config Warning */}
+            {configMissing && (
+              <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-4 text-center">
+                <p className="text-red-400 font-medium mb-2">⚠️ Firebase Not Configured!</p>
+                <p className="text-gray-400 text-sm">1. Create a Firebase project at console.firebase.google.com</p>
+                <p className="text-gray-400 text-sm">2. Enable Realtime Database</p>
+                <p className="text-gray-400 text-sm">3. Copy config to index.html (line 43-51)</p>
+              </div>
+            )}
+
             {/* LOBBY */}
             {activeTab === 'lobby' && (
               <div className="space-y-6 animate-fade-in">
-                {/* Contract Warning */}
-                {CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000' && (
-                  <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-4 text-center">
-                    <p className="text-red-400 font-medium mb-2">⚠️ Contract Not Deployed!</p>
-                    <p className="text-gray-400 text-sm">1. Deploy <code className="bg-black/30 px-1 rounded">consensus_gallery_online.py</code> to GenLayer Studio</p>
-                    <p className="text-gray-400 text-sm">2. Copy contract address and update line 48 in index.html</p>
-                  </div>
-                )}
-                
-                {/* Wallet Tips */}
-                {wallet.connected && CONTRACT_ADDRESS !== '0x0000000000000000000000000000000000000000' && (
-                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-center text-sm">
-                    <span className="text-blue-400">💡 Need GEN tokens? Get free test tokens from </span>
-                    <a href="https://studio.genlayer.com" target="_blank" className="text-blue-300 underline">GenLayer Studio Faucet</a>
-                  </div>
-                )}
-                
-                {/* Create Game */}
                 <div className="glass rounded-2xl p-6">
                   <h3 className="text-lg font-semibold mb-2">🎮 Create New Game</h3>
-                  <p className="text-sm text-gray-400 mb-4">Game: {CONFIG.MAX_GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
-                  <button onClick={handleCreateRoom} disabled={processing || CONTRACT_ADDRESS === '0x0000000000000000000000000000000000000000'} className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white disabled:opacity-50">
+                  <p className="text-sm text-gray-400 mb-4">Game: {CONFIG.GAME_DURATION / 60}min | Vote: {CONFIG.VOTE_DURATION}s</p>
+                  <button onClick={handleCreateRoom} disabled={processing || configMissing} 
+                    className="btn-primary w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 text-white disabled:opacity-50">
                     {processing ? <><Spinner /> Processing...</> : wallet.connected ? '✨ Create Room' : '🦊 Connect & Create'}
                   </button>
                 </div>
 
-                {/* Available Rooms */}
                 <div className="glass rounded-2xl p-6">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold">🚪 Available Rooms ({waitingRooms.length})</h3>
-                    <button onClick={handleRefresh} disabled={refreshing} className="text-sm text-gray-400 hover:text-white flex items-center gap-1">
-                      {refreshing ? <Spinner /> : '🔄'} Refresh
-                    </button>
-                  </div>
+                  <h3 className="text-lg font-semibold mb-4">🚪 Available Rooms ({waitingRooms.length})</h3>
                   {waitingRooms.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">No rooms available. Create one!</div>
                   ) : (
@@ -794,10 +825,11 @@
                             <ArtDisplay artId={room.artId} size={60} />
                             <div>
                               <div className="font-medium">{getArt(room.artId).name}</div>
-                              <div className="text-sm text-gray-400">👥 {room.playerCount}/{CONFIG.MAX_PLAYERS} | Host: {getPlayerId(room.creator)}</div>
+                              <div className="text-sm text-gray-400">👥 {room.playerCount}/{CONFIG.MAX_PLAYERS}</div>
                             </div>
                           </div>
-                          <button onClick={() => handleJoinRoom(room.id)} disabled={processing} className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">
+                          <button onClick={() => handleJoinRoom(room.id)} disabled={processing} 
+                            className="btn-success px-4 py-2 rounded-lg text-white text-sm font-medium">
                             {processing ? <Spinner /> : 'Join'}
                           </button>
                         </div>
@@ -806,15 +838,12 @@
                   )}
                 </div>
 
-                {/* Stats */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="glass rounded-xl p-4 text-center">
-                    <div className="text-2xl mb-1">🎮</div>
                     <div className="text-2xl font-bold">{totalGames}</div>
                     <div className="text-xs text-gray-500">Total Games</div>
                   </div>
                   <div className="glass rounded-xl p-4 text-center">
-                    <div className="text-2xl mb-1">👥</div>
                     <div className="text-2xl font-bold">{leaderboard.length}</div>
                     <div className="text-xs text-gray-500">Players</div>
                   </div>
@@ -832,9 +861,8 @@
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Left Column */}
+                    {/* Left */}
                     <div className="space-y-4">
-                      {/* Status */}
                       <div className="glass rounded-xl p-4">
                         <div className="flex items-center justify-between">
                           <span className="px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-2" 
@@ -842,7 +870,7 @@
                             <span className="w-2 h-2 rounded-full pulse-dot" style={{ background: phaseColors[currentRoom.phase] }}></span>
                             {phaseLabels[currentRoom.phase]}
                           </span>
-                          {(currentRoom.phase === '1' || currentRoom.phase === '2') && (
+                          {['playing', 'voting'].includes(currentRoom.phase) && (
                             <div className={`px-3 py-1.5 rounded-lg ${timeLeft <= 30 ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}>
                               <span className="text-xl font-bold font-mono">{formatTime(timeLeft)}</span>
                             </div>
@@ -850,79 +878,56 @@
                         </div>
                       </div>
 
-                      {/* Artwork */}
                       <div className="glass rounded-xl p-6 text-center">
                         <ArtDisplay artId={currentRoom.artId} size={300} />
                         
-                        {/* Waiting Phase */}
-                        {currentRoom.phase === '0' && (
+                        {currentRoom.phase === 'waiting' && (
                           <div className="mt-4 p-3 bg-white/5 rounded-lg">
                             <div className="text-sm text-gray-400 mb-2">Players ({players.length}/{CONFIG.MAX_PLAYERS})</div>
                             <div className="flex flex-wrap gap-2 justify-center">
                               {players.map(addr => (
-                                <span key={addr} className={`px-2 py-1 rounded text-xs ${addr.toLowerCase() === wallet.address.toLowerCase() ? 'bg-primary-500/30 text-primary-300' : isAI(addr) ? 'bg-yellow-500/20 text-yellow-300' : 'bg-white/10'}`}>
+                                <span key={addr} className={`px-2 py-1 rounded text-xs ${addr === wallet.address ? 'bg-primary-500/30 text-primary-300' : isAI(addr) ? 'bg-yellow-500/20 text-yellow-300' : 'bg-white/10'}`}>
                                   {isAI(addr) && '🤖 '}{getPlayerId(addr)}{addr === currentRoom.creator && ' 👑'}
                                 </span>
                               ))}
                             </div>
-                            {currentRoom.creator.toLowerCase() === wallet.address.toLowerCase() && players.length >= CONFIG.MIN_PLAYERS && (
+                            {currentRoom.creator === wallet.address && players.length >= CONFIG.MIN_PLAYERS && (
                               <button onClick={handleStartGame} disabled={processing} className="btn-success w-full mt-4 py-3 rounded-lg text-white font-semibold">
                                 {processing ? <Spinner /> : '🚀 Start Game'}
                               </button>
-                            )}
-                            {players.length < CONFIG.MIN_PLAYERS && (
-                              <p className="text-sm text-yellow-500 mt-3">Waiting for players... (AI joins in {Math.max(0, Math.ceil((CONFIG.AI_FILL_DELAY * 1000 - (Date.now() - (roomCreateTime || Date.now()))) / 1000))}s)</p>
                             )}
                           </div>
                         )}
                       </div>
 
-                      {/* Finished - Results */}
-                      {currentRoom.phase === '3' && currentRoom.winner && (
-                        <div className="rounded-xl p-6 text-center" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.2))', border: '1px solid rgba(139,92,246,0.3)' }}>
-                          <div className="text-4xl mb-3">🏆</div>
-                          <h3 className="text-xl font-bold mb-2">Game Over!</h3>
-                          <p className="text-sm text-gray-400 mb-3">Winner: {getPlayerId(currentRoom.winner)}{isAI(currentRoom.winner) && ' 🤖'}</p>
-                          
-                          {/* XP Breakdown */}
-                          {getXpEarned() && (
-                            <div className="bg-white/10 rounded-lg p-3 mb-3 text-left">
-                              <div className="text-sm font-medium text-gray-300 mb-2">📊 Your XP:</div>
-                              <div className="space-y-1 text-sm">
-                                {getXpEarned().winner > 0 && <div className="flex justify-between"><span className="text-yellow-400">🏆 Won</span><span className="text-yellow-400">+{getXpEarned().winner} XP</span></div>}
-                                {getXpEarned().vote > 0 && <div className="flex justify-between"><span className="text-green-400">✓ Correct vote</span><span className="text-green-400">+{getXpEarned().vote} XP</span></div>}
-                                {getXpEarned().participate > 0 && <div className="flex justify-between"><span className="text-blue-400">👤 Participated</span><span className="text-blue-400">+{getXpEarned().participate} XP</span></div>}
-                                <div className="border-t border-white/10 pt-1 mt-1 flex justify-between font-bold"><span className="text-primary-300">Total</span><span className="text-primary-300">+{getXpEarned().total} XP</span></div>
-                              </div>
-                            </div>
-                          )}
-                          
-                          <button onClick={handleLeaveRoom} className="btn-primary mt-2 px-6 py-2 rounded-lg text-white font-semibold">Back to Lobby</button>
+                      {currentRoom.phase === 'finished' && (
+                        <div className="rounded-xl p-6 text-center" style={{ background: currentRoom.isTie ? 'linear-gradient(135deg, rgba(107,114,128,0.2), rgba(75,85,99,0.2))' : 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.2))', border: currentRoom.isTie ? '1px solid rgba(107,114,128,0.3)' : '1px solid rgba(139,92,246,0.3)' }}>
+                          <div className="text-4xl mb-3">{currentRoom.isTie ? '🤝' : '🏆'}</div>
+                          <h3 className="text-xl font-bold mb-2">{currentRoom.isTie ? "It's a Tie!" : 'Game Over!'}</h3>
+                          <p className="text-sm text-gray-400 mb-3">
+                            {currentRoom.isTie ? 'No winner - everyone gets participation XP' : `Winner: ${getPlayerId(currentRoom.winner)}`}
+                          </p>
+                          <button onClick={handleLeaveRoom} className="btn-primary px-6 py-2 rounded-lg text-white font-semibold">Back to Lobby</button>
                         </div>
                       )}
 
-                      {currentRoom.phase !== '3' && (
+                      {currentRoom.phase !== 'finished' && (
                         <button onClick={handleLeaveRoom} className="w-full py-2 text-sm text-gray-500 hover:text-gray-300">Leave Room</button>
                       )}
                     </div>
 
-                    {/* Right Column */}
+                    {/* Right */}
                     <div className="space-y-4">
-                      {/* Playing - Chat */}
-                      {currentRoom.phase === '1' && (
+                      {currentRoom.phase === 'playing' && (
                         <div className="glass rounded-xl p-5">
-                          <div className="flex justify-between items-center mb-3">
-                            <h3 className="font-semibold">💬 Describe the Art</h3>
-                            <button onClick={handleStartVoting} className="text-xs text-yellow-500 hover:text-yellow-400">End Early →</button>
-                          </div>
+                          <h3 className="font-semibold mb-3">💬 Describe the Art</h3>
                           <div className="chat-scroll mb-4 space-y-2 p-2 bg-black/20 rounded-lg min-h-[200px]">
                             {messages.length === 0 ? (
                               <div className="text-center py-8 text-gray-500 text-sm">Start describing!</div>
                             ) : messages.map(msg => (
-                              <div key={msg.id} className={`p-3 rounded-lg ${msg.author.toLowerCase() === wallet.address.toLowerCase() ? 'bg-primary-500/20 ml-8' : isAI(msg.author) ? 'bg-yellow-500/10 mr-8' : 'bg-white/5 mr-8'}`}>
+                              <div key={msg.id} className={`p-3 rounded-lg ${msg.author === wallet.address ? 'bg-primary-500/20 ml-8' : isAI(msg.author) ? 'bg-yellow-500/10 mr-8' : 'bg-white/5 mr-8'}`}>
                                 <div className="flex justify-between items-start mb-1">
                                   <span className="text-xs font-medium text-gray-400">{isAI(msg.author) && '🤖 '}{getPlayerId(msg.author)}</span>
-                                  <span className="text-xs text-gray-500">{new Date(msg.timestamp).toLocaleTimeString()}</span>
                                 </div>
                                 <p className="text-gray-200">{msg.content}</p>
                               </div>
@@ -933,44 +938,63 @@
                             <input type="text" value={message} onChange={e => setMessage(e.target.value)} 
                               onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
                               placeholder="Describe the art..." 
-                              className="flex-1 px-4 py-2 rounded-lg bg-black/30 border border-white/10 text-gray-200 focus:outline-none focus:border-primary-500/50" />
+                              className="flex-1 px-4 py-2 rounded-lg bg-black/30 border border-white/10 text-gray-200 focus:outline-none" />
                             <button onClick={handleSendMessage} disabled={!message.trim() || processing} 
                               className={`px-4 py-2 rounded-lg font-medium ${message.trim() ? 'btn-success text-white' : 'bg-white/10 text-gray-500'}`}>
-                              {processing ? <Spinner /> : 'Send'}
+                              Send
                             </button>
                           </div>
-                        </div>
-                      )}
-
-                      {/* Voting */}
-                      {currentRoom.phase === '2' && (
-                        <div className="glass rounded-xl p-5">
-                          <div className="flex justify-between items-center mb-3">
-                            <h3 className="font-semibold">🗳️ Vote for Best</h3>
-                            <button onClick={handleFinishGame} className="text-xs text-yellow-500 hover:text-yellow-400">Finalize →</button>
-                          </div>
-                          <div className="space-y-3">
-                            {authors.map(addr => (
-                              <div key={addr} onClick={() => handleVote(addr)} 
-                                className={`p-4 rounded-lg transition cursor-pointer ${votes[wallet.address] === addr ? 'bg-primary-500/20 border border-primary-500/40' : 'bg-white/5 border border-white/5 hover:bg-white/10'}`}>
-                                <div className="flex justify-between items-center mb-2">
-                                  <span className="text-sm font-medium">{isAI(addr) && '🤖 '}{getPlayerId(addr)}{addr.toLowerCase() === wallet.address.toLowerCase() ? ' (You)' : ''}</span>
-                                  <span className="text-yellow-500 text-sm">🗳️ {voteCount[addr] || 0}</span>
+                          {/* Vote to End (available after 1 minute) */}
+                          {currentRoom.startTime && (Date.now() - currentRoom.startTime) > 60000 && (
+                            <div className="mt-4 pt-4 border-t border-white/10">
+                              <div className="flex items-center justify-between">
+                                <div className="text-sm text-gray-400">
+                                  <span className="text-yellow-500">⏱️</span> Vote to skip to voting phase
+                                  <span className="ml-2 text-xs">({Object.keys(currentRoom.endVotes || {}).length}/{Math.ceil(Object.keys(currentRoom.players || {}).filter(p => !p.startsWith('AI_')).length / 2 + 0.1)} needed)</span>
                                 </div>
-                                <div className="space-y-1">
-                                  {messages.filter(m => m.author === addr).slice(0, 2).map((m, i) => (
-                                    <p key={i} className="text-sm text-gray-300 truncate">"{m.content}"</p>
-                                  ))}
-                                </div>
-                                {votes[wallet.address] === addr && <div className="mt-2 text-sm text-primary-400">✓ Your vote</div>}
+                                <button 
+                                  onClick={handleVoteEnd} 
+                                  disabled={processing || currentRoom.endVotes?.[wallet.address]}
+                                  className={`px-3 py-1 rounded-lg text-sm ${currentRoom.endVotes?.[wallet.address] ? 'bg-gray-500/30 text-gray-400' : 'bg-orange-500/20 text-orange-300 hover:bg-orange-500/30'}`}>
+                                  {currentRoom.endVotes?.[wallet.address] ? '✓ Voted' : 'End Early'}
+                                </button>
                               </div>
-                            ))}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      {/* Finished - Final Results */}
-                      {currentRoom.phase === '3' && (
+                      {currentRoom.phase === 'voting' && (
+                        <div className="glass rounded-xl p-5">
+                          <h3 className="font-semibold mb-3">🗳️ Vote for Best</h3>
+                          {authors.length === 0 ? (
+                            <div className="text-center py-4 text-gray-500">No descriptions submitted</div>
+                          ) : (
+                            <div className="space-y-3">
+                              {authors.map(addr => {
+                                const authorMsgs = messages.filter(m => m.author === addr);
+                                if (authorMsgs.length === 0) return null;
+                                return (
+                                  <div key={addr} onClick={() => handleVote(addr)} 
+                                    className={`p-4 rounded-lg transition cursor-pointer ${currentRoom.votes?.[wallet.address] === addr ? 'bg-primary-500/20 border border-primary-500/40' : 'bg-white/5 hover:bg-white/10'}`}>
+                                    <div className="flex justify-between items-center mb-2">
+                                      <span className="text-sm font-medium">{isAI(addr) && '🤖 '}{getPlayerId(addr)}</span>
+                                      <span className="text-yellow-500 text-sm">🗳️ {voteCount[addr] || 0}</span>
+                                    </div>
+                                    <div className="space-y-1">
+                                      {authorMsgs.map((msg, i) => (
+                                        <p key={i} className="text-sm text-gray-300">{msg.content}</p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {currentRoom.phase === 'finished' && (
                         <div className="glass rounded-xl p-5">
                           <h3 className="font-semibold mb-4">📊 Final Results</h3>
                           <div className="space-y-2">
@@ -1001,19 +1025,32 @@
                   <div className="space-y-3">
                     {gameHistory.map((game, idx) => (
                       <div key={idx} className="p-4 rounded-xl bg-white/5">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-3">
                             <ArtDisplay artId={game.artId} size={50} />
                             <div>
                               <div className="font-medium text-sm">{getArt(game.artId).name}</div>
-                              <div className="text-xs text-gray-400">Room: {game.id}</div>
-                              <div className="text-xs text-gray-500 mt-1">Winner: {getPlayerId(game.winner)}{isAI(game.winner) && ' 🤖'}</div>
+                              <div className="text-xs text-gray-500">
+                                {game.isTie ? '🤝 Tie' : `🏆 Winner: ${game.winnerName || getPlayerId(game.winner)}`}
+                              </div>
                             </div>
                           </div>
                           <div className="text-xs text-gray-500">
                             {new Date(game.timestamp).toLocaleDateString()}
                           </div>
                         </div>
+                        {/* Show participant XP */}
+                        {game.participants && (
+                          <div className="mt-2 pt-2 border-t border-white/5">
+                            <div className="flex flex-wrap gap-2">
+                              {Object.entries(game.participants).map(([addr, info]) => (
+                                <span key={addr} className={`text-xs px-2 py-1 rounded ${info.isWinner ? 'bg-yellow-500/20 text-yellow-300' : 'bg-white/5 text-gray-400'}`}>
+                                  {info.playerId}: <span className="text-primary-300">+{info.xp} XP</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1030,14 +1067,14 @@
                 ) : (
                   <div className="space-y-2">
                     {leaderboard.map((p, idx) => (
-                      <div key={p.address} className={`grid grid-cols-[40px_1fr_80px_60px_60px] items-center p-3 rounded-lg ${idx === 0 ? 'bg-yellow-500/10' : p.address.toLowerCase() === wallet.address.toLowerCase() ? 'bg-primary-500/10' : 'bg-white/3'}`}>
+                      <div key={p.address} className={`grid grid-cols-[40px_1fr_80px_60px_60px] items-center p-3 rounded-lg ${idx === 0 ? 'bg-yellow-500/10' : p.address === wallet.address ? 'bg-primary-500/10' : 'bg-white/3'}`}>
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${idx < 3 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-white/10'}`}>
                           {idx < 3 ? ['🥇', '🥈', '🥉'][idx] : idx + 1}
                         </div>
-                        <span className="text-sm font-medium truncate">{p.playerId}{p.address.toLowerCase() === wallet.address.toLowerCase() && ' (You)'}</span>
+                        <span className="text-sm font-medium truncate">{p.playerId}</span>
                         <div className="text-center"><div className="font-bold text-primary-300">{p.exp}</div><div className="text-[10px] text-gray-500">XP</div></div>
                         <div className="text-center"><div className="font-bold text-green-400">{p.wins}</div><div className="text-[10px] text-gray-500">Wins</div></div>
-                        <div className="text-center"><div className="font-bold text-gray-300">{p.parts}</div><div className="text-[10px] text-gray-500">Games</div></div>
+                        <div className="text-center"><div className="font-bold text-gray-300">{p.games}</div><div className="text-[10px] text-gray-500">Games</div></div>
                       </div>
                     ))}
                   </div>
@@ -1048,8 +1085,7 @@
 
           <footer className="text-center py-6 border-t border-white/5 mt-8">
             <p className="text-sm text-gray-500">
-              Consensus Gallery | <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a>
-              <span className="ml-2 text-xs text-green-400">🌐 Online Multiplayer</span>
+              Consensus Gallery |  <a href="https://genlayer.com" target="_blank" className="text-primary-400 hover:underline">GenLayer</a>
             </p>
           </footer>
         </div>
