@@ -5,23 +5,11 @@
 
 // Network configurations
 const NETWORKS = {
-  localnet: {
-    name: 'GenLayer Localnet',
-    chainId: 61999,
-    rpcUrl: 'http://localhost:4000/api',
-    explorerUrl: 'http://localhost:4000'
-  },
   studionet: {
     name: 'GenLayer Studio',
     chainId: 61999,
     rpcUrl: 'https://rpc.studio.genlayer.com',
     explorerUrl: 'https://studio.genlayer.com'
-  },
-  testnet: {
-    name: 'GenLayer Testnet Asimov',
-    chainId: 61999,
-    rpcUrl: 'https://rpc.testnet-asimov.genlayer.com',
-    explorerUrl: 'https://explorer.testnet-asimov.genlayer.com'
   }
 };
 
