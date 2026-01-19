@@ -151,13 +151,26 @@
     };
 
     const writeContract = async (from, fn, args = []) => {
-      if (!window.ethereum) throw new Error('MetaMask required');
-      const callData = JSON.stringify({ function: fn, args });
-      const hexData = '0x' + [...callData].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
-      return await window.ethereum.request({
-        method: 'eth_sendTransaction',
-        params: [{ from, to: CONTRACT_ADDRESS, data: hexData, gas: '0x100000' }]
-      });
+      if (!window.ethereum) return null;
+      try {
+        const callData = JSON.stringify({ function: fn, args });
+        const hexData = '0x' + [...callData].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+        
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Transaction timeout')), 30000)
+        );
+        
+        const txPromise = window.ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{ from, to: CONTRACT_ADDRESS, data: hexData, gas: '0x100000' }]
+        });
+        
+        return await Promise.race([txPromise, timeoutPromise]);
+      } catch (e) {
+        console.log('WriteContract failed:', e.message);
+        return null;
+      }
     };
 
     // ========== Components ==========
@@ -454,9 +467,38 @@
       const connectWallet = async () => {
         if (!window.ethereum) { setError('Please install MetaMask!'); return; }
         try {
+          // GenLayer Studio network config
+          const GENLAYER_CHAIN_ID = '0xF21F'; // 61999 in hex
+          const GENLAYER_NETWORK = {
+            chainId: GENLAYER_CHAIN_ID,
+            chainName: 'GenLayer Studio',
+            rpcUrls: ['https://rpc.studio.genlayer.com'],
+            nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+            blockExplorerUrls: ['https://studio.genlayer.com']
+          };
+          
+          // Try to switch to GenLayer network
+          try {
+            await window.ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: GENLAYER_CHAIN_ID }]
+            });
+          } catch (switchError) {
+            // Network not added, add it
+            if (switchError.code === 4902) {
+              await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [GENLAYER_NETWORK]
+              });
+            } else {
+              throw switchError;
+            }
+          }
+          
+          // Now connect account
           const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
           if (accounts[0]) setWallet({ connected: true, address: accounts[0] });
-        } catch (e) { setError('Connection failed'); }
+        } catch (e) { setError('Connection failed: ' + (e.message || '')); }
       };
 
       useEffect(() => {
@@ -488,15 +530,12 @@
         
         setProcessing(true);
         try {
-          // Call contract first (create blockchain transaction)
           const db = firebase.database();
           const roomRef = db.ref('rooms').push();
           const roomId = roomRef.key;
-          
-          await writeContract(wallet.address, 'join_game', [roomId]);
-          
           const artId = Math.floor(Math.random() * ART_COLLECTION.length) + 1;
           
+          // Create room in Firebase first (critical for gameplay)
           await roomRef.set({
             phase: 'waiting',
             creator: wallet.address,
@@ -513,6 +552,11 @@
           setCurrentRoomId(roomId);
           setActiveTab('game');
           setSuccess('Room created!');
+          
+          // Record on blockchain in background (non-blocking)
+          writeContract(wallet.address, 'join_game', [roomId]).catch(e => {
+            console.log('Blockchain record skipped:', e.message);
+          });
         } catch (e) {
           setError(e.message || 'Failed to create room');
         }
@@ -525,9 +569,7 @@
         
         setProcessing(true);
         try {
-          // Call contract first (create blockchain transaction)
-          await writeContract(wallet.address, 'join_game', [roomId]);
-          
+          // Join room in Firebase first (critical for gameplay)
           const db = firebase.database();
           await db.ref(`rooms/${roomId}/players/${wallet.address}`).set({
             joinTime: Date.now(),
@@ -536,6 +578,11 @@
           setCurrentRoomId(roomId);
           setActiveTab('game');
           setSuccess('Joined room!');
+          
+          // Record on blockchain in background (non-blocking)
+          writeContract(wallet.address, 'join_game', [roomId]).catch(e => {
+            console.log('Blockchain record skipped:', e.message);
+          });
         } catch (e) {
           setError(e.message || 'Failed to join');
         }
