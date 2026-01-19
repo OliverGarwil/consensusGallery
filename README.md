@@ -15,7 +15,7 @@
 ```
 consensus-gallery-blockchain/
 ├── contracts/
-│   └── consensus_gallery.py    # GenLayer Intelligent Contract
+│   └── consensus_gallery_online.py    # GenLayer Intelligent Contract
 ├── public/
 │   └── index.html              # Frontend application
 ├── vercel.json                 # Vercel deployment config
@@ -28,11 +28,8 @@ consensus-gallery-blockchain/
 
 | 文件 | 说明 | 推荐场景 |
 |------|------|----------|
-| `contracts/minimal.py` | **最简化版** - 推荐先部署这个 | 首次测试 |
-| `contracts/consensus_gallery_simple.py` | 简化版 | 功能测试 |
-| `contracts/consensus_gallery.py` | 完整版 | 生产环境 |
+| `contracts/consensus_gallery_online.py` | 
 
-**建议**: 先用 `minimal.py` 测试部署是否成功，再尝试完整版。
 
 ### Step 1: Deploy the Smart Contract to GenLayer
 
@@ -47,7 +44,6 @@ This is the **easiest method** - no CLI installation required!
 4. Copy the contract code from `contracts/consensus_gallery.py`
 5. Click "Deploy"
 6. Enter your treasury address when prompted
-7. **Copy the deployed contract address** (you'll need this!)
 
 
 ### Step 2: Update Contract Address
@@ -89,11 +85,10 @@ CURRENT_NETWORK: 'studionet' // or 'localnet' or 'testnet'
 
 ## Rewards
 
-| Action | XP Reward | GEN Reward |
-|--------|-----------|------------|
-| Win Game | +100 XP | 80% of pool |
-| Vote for Winner | +30 XP | - |
-| Participate | +10 XP | - |
+| Action | XP Reward |
+|--------|-----------|
+| Win Game | +100 XP | 
+| Participate | +10 XP |
 
 ## Configuration
 
@@ -115,9 +110,7 @@ const CONFIG = {
 
 | Network | RPC URL | Use Case |
 |---------|---------|----------|
-| Localnet | http://localhost:4000/api | Local development |
 | Studionet | https://rpc.studio.genlayer.com | Testing in Studio |
-| Testnet Asimov | https://rpc.testnet-asimov.genlayer.com | Public testnet |
 
 ## Smart Contract Functions
 
@@ -147,7 +140,6 @@ const CONFIG = {
 
 ## Security Notes
 
-- Entry fees are held in the contract until game ends
 - All game actions are verifiable on-chain
 
 ## Local Development
@@ -175,23 +167,10 @@ npx serve public
 cd public && python -m http.server 3000
 ```
 
-## License
-
-MIT License
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
 
 ## Support
 
 - [GenLayer Documentation](https://docs.genlayer.com)
-- [GenLayer Discord](https://discord.gg/genlayer)
-- [GenLayer Telegram](https://t.me/genlayer)
 
 ---
 
