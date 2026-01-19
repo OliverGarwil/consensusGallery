@@ -454,9 +454,38 @@
       const connectWallet = async () => {
         if (!window.ethereum) { setError('Please install MetaMask!'); return; }
         try {
+          // GenLayer Studio network config
+          const GENLAYER_CHAIN_ID = '0xF21F'; // 61999 in hex
+          const GENLAYER_NETWORK = {
+            chainId: GENLAYER_CHAIN_ID,
+            chainName: 'GenLayer Studio',
+            rpcUrls: ['https://rpc.studio.genlayer.com'],
+            nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+            blockExplorerUrls: ['https://studio.genlayer.com']
+          };
+          
+          // Try to switch to GenLayer network
+          try {
+            await window.ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: GENLAYER_CHAIN_ID }]
+            });
+          } catch (switchError) {
+            // Network not added, add it
+            if (switchError.code === 4902) {
+              await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [GENLAYER_NETWORK]
+              });
+            } else {
+              throw switchError;
+            }
+          }
+          
+          // Now connect account
           const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
           if (accounts[0]) setWallet({ connected: true, address: accounts[0] });
-        } catch (e) { setError('Connection failed'); }
+        } catch (e) { setError('Connection failed: ' + (e.message || '')); }
       };
 
       useEffect(() => {
