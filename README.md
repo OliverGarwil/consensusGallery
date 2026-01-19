@@ -1,8 +1,8 @@
 # Consensus Gallery - GenLayer Blockchain Game
 
-🎨 A multiplayer art description game running on GenLayer blockchain. Players compete to write the best descriptions of famous artworks, with all game actions recorded on-chain.
+ A multiplayer art description game running on GenLayer blockchain. Players compete to write the best descriptions of famous artworks, with all game actions recorded on-chain.
 
-## 🌟 Features
+## Features
 
 - **On-Chain Gaming**: All game state is stored on GenLayer blockchain
 - **Real-time Multiplayer**: Multiple players can join the same game room
@@ -10,7 +10,7 @@
 - **Prize Pool**: Winners receive 80% of the entry fee pool
 - **XP System**: Earn experience points for winning, voting correctly, and participating
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 consensus-gallery-blockchain/
@@ -22,7 +22,7 @@ consensus-gallery-blockchain/
 └── README.md
 ```
 
-## 🚀 Deployment
+## Deployment
 
 ### 合约文件说明
 
